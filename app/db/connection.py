@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     user_phone VARCHAR(50),
     query_type VARCHAR(50),
     status VARCHAR(50) NOT NULL DEFAULT 'received',
+    vapi_call_id VARCHAR(255),
+    transcript TEXT,
+    tool_calls_made JSONB,
     final_result JSONB,
     error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -136,6 +139,17 @@ CREATE INDEX IF NOT EXISTS idx_llm_logs_ticket ON llm_logs(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_tool_logs_ticket ON tool_call_logs(ticket_id);
 """
 
+_MIGRATION_SQL = """
+DO $$ BEGIN
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS vapi_call_id VARCHAR(255);
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript TEXT;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tool_calls_made JSONB;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_tickets_vapi_call ON tickets(vapi_call_id);
+"""
+
 
 @contextmanager
 def get_connection(db_url: Optional[str] = None) -> Generator[PgConnection, None, None]:
@@ -155,8 +169,9 @@ def get_connection(db_url: Optional[str] = None) -> Generator[PgConnection, None
 
 
 def init_db(db_url: Optional[str] = None) -> None:
-    """Create tables if they do not exist."""
+    """Create tables if they do not exist, then run migrations."""
     with get_connection(db_url) as conn:
         with conn.cursor() as cur:
             cur.execute(_SCHEMA_SQL)
+            cur.execute(_MIGRATION_SQL)
     logger.info("Database schema initialized")

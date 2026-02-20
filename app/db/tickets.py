@@ -1,8 +1,6 @@
 """DB operations for the commerce/ticket pipeline."""
 import json
 import logging
-from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any, Optional
 
 from app.db.connection import get_connection
@@ -64,7 +62,8 @@ def get_ticket(ticket_id: str) -> Optional[dict[str, Any]]:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT id, ticket_id, query, location, user_phone, query_type,
-                          status, final_result, error_message, created_at, updated_at
+                          status, vapi_call_id, transcript, tool_calls_made,
+                          final_result, error_message, created_at, updated_at
                    FROM tickets WHERE ticket_id = %s""",
                 (ticket_id,),
             )
@@ -74,10 +73,65 @@ def get_ticket(ticket_id: str) -> Optional[dict[str, Any]]:
     return {
         "id": row[0], "ticket_id": row[1], "query": row[2], "location": row[3],
         "user_phone": row[4], "query_type": row[5], "status": row[6],
-        "final_result": row[7], "error_message": row[8],
-        "created_at": row[9].isoformat() if row[9] else None,
-        "updated_at": row[10].isoformat() if row[10] else None,
+        "vapi_call_id": row[7], "transcript": row[8], "tool_calls_made": row[9],
+        "final_result": row[10], "error_message": row[11],
+        "created_at": row[12].isoformat() if row[12] else None,
+        "updated_at": row[13].isoformat() if row[13] else None,
     }
+
+
+def set_ticket_vapi_call_id(ticket_id: str, vapi_call_id: str) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE tickets SET vapi_call_id = %s, updated_at = NOW() WHERE ticket_id = %s",
+                (vapi_call_id, ticket_id),
+            )
+
+
+def get_ticket_by_vapi_call_id(vapi_call_id: str) -> Optional[dict[str, Any]]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT ticket_id FROM tickets WHERE vapi_call_id = %s",
+                (vapi_call_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return get_ticket(row[0])
+
+
+def append_ticket_tool_call(ticket_id: str, tool_call: dict) -> None:
+    """Append a tool call record to the ticket's tool_calls_made JSONB array."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE tickets
+                   SET tool_calls_made = COALESCE(tool_calls_made, '[]'::jsonb) || %s::jsonb,
+                       updated_at = NOW()
+                   WHERE ticket_id = %s""",
+                (json.dumps([tool_call], default=str), ticket_id),
+            )
+
+
+def save_ticket_transcript(ticket_id: str, transcript: str, ended_reason: str) -> None:
+    """Save the call transcript and update the final result with full call details."""
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        return
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE tickets SET transcript = %s, updated_at = NOW() WHERE ticket_id = %s",
+                (transcript, ticket_id),
+            )
+
+    existing_result = ticket.get("final_result") or {}
+    existing_result["transcript"] = transcript
+    existing_result["ended_reason"] = ended_reason
+    existing_result["tool_calls_made"] = ticket.get("tool_calls_made") or []
+    set_ticket_final_result(ticket_id, existing_result)
 
 
 # ---------------------------------------------------------------------------

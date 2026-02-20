@@ -99,14 +99,29 @@ async def vapi_webhook(request: Request) -> Response:
 
     msg = body.get("message") or {}
     msg_type = msg.get("type") or "(unknown)"
+    vapi_call_id = _vapi_call_id_from_message(body)
 
+    # ---- end-of-call-report: save transcript + finalize ticket ----
     if msg_type == "end-of-call-report":
         ended_reason = msg.get("endedReason") or body.get("endedReason") or "(none)"
         transcript = (msg.get("transcript") or msg.get("artifact", {}).get("transcript") or "").strip()
-        logger.info("VAPI wakeup call ended: reason=%s", ended_reason)
+        logger.info("VAPI wakeup call ended: vapi_call_id=%s reason=%s", vapi_call_id, ended_reason)
         if transcript:
             logger.info("Transcript: %s", transcript[:2000])
 
+        if vapi_call_id:
+            try:
+                from app.db.tickets import get_ticket_by_vapi_call_id, save_ticket_transcript
+                ticket = get_ticket_by_vapi_call_id(vapi_call_id)
+                if ticket:
+                    save_ticket_transcript(ticket["ticket_id"], transcript, ended_reason)
+                    logger.info("Wakeup transcript saved for ticket %s", ticket["ticket_id"])
+            except Exception:
+                logger.exception("Failed to save wakeup transcript for vapi_call_id=%s", vapi_call_id)
+
+        return Response(status_code=200, content=b"{}")
+
+    # ---- assistant-request ----
     if msg_type == "assistant-request":
         server_url = Config.VAPI_SERVER_URL or str(request.base_url).rstrip("/")
         prompt_loader = PromptLoader()
@@ -114,11 +129,12 @@ async def vapi_webhook(request: Request) -> Response:
         assistant = get_wakeup_assistant_for_webhook(server_url, system_prompt)
         return Response(content=json.dumps({"assistant": assistant}), media_type="application/json")
 
+    # ---- tool-calls: execute + log to ticket ----
     if msg_type == "tool-calls":
         customer_number = _customer_number_from_message(body)
         tool_call_list = _extract_tool_call_list(body)
 
-        logger.info("VAPI wakeup tool-calls: %d items", len(tool_call_list))
+        logger.info("VAPI wakeup tool-calls: %d items, vapi_call_id=%s", len(tool_call_list), vapi_call_id)
         results = []
         for item in tool_call_list:
             name = _tool_name(item)
@@ -146,6 +162,18 @@ async def vapi_webhook(request: Request) -> Response:
                 "toolCallId": tcid,
                 "result": json.dumps(result) if not isinstance(result, str) else result,
             })
+
+            # Log tool call to ticket if we can find it
+            if vapi_call_id:
+                try:
+                    from app.db.tickets import get_ticket_by_vapi_call_id, append_ticket_tool_call
+                    ticket = get_ticket_by_vapi_call_id(vapi_call_id)
+                    if ticket:
+                        append_ticket_tool_call(ticket["ticket_id"], {
+                            "tool": name, "params": params, "result": result,
+                        })
+                except Exception:
+                    logger.exception("Failed to log wakeup tool call to ticket")
 
         return Response(content=json.dumps({"results": results}), media_type="application/json")
 

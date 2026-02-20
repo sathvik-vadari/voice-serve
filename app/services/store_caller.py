@@ -36,10 +36,15 @@ def _build_store_prompt(product: dict[str, Any], location: str) -> str:
     return prompt
 
 
-async def call_stores(ticket_id: str, product: dict[str, Any], location: str) -> list[dict[str, Any]]:
+async def call_stores(
+    ticket_id: str, product: dict[str, Any], location: str,
+    *, test_mode: bool = False, test_phone: str | None = None,
+) -> list[dict[str, Any]]:
     """
-    Initiate VAPI calls to all stores saved for this ticket.
-    Returns list of {store_id, store_call_id, vapi_call_id, status} for each attempt.
+    Initiate VAPI calls to stores saved for this ticket.
+
+    In test_mode: only places ONE call to test_phone (using the first store's
+    context) so you can hear the bot without calling real stores.
     """
     stores = get_stores(ticket_id)
     if not stores:
@@ -49,13 +54,22 @@ async def call_stores(ticket_id: str, product: dict[str, Any], location: str) ->
     prompt = _build_store_prompt(product, location)
     results = []
 
-    for store in stores:
-        phone = store.get("phone_number")
+    targets = stores if not test_mode else stores[:1]
+
+    for store in targets:
+        # In test mode override the phone number
+        phone = test_phone if test_mode else store.get("phone_number")
         if not phone:
             logger.warning("Skipping store %s – no phone number", store["store_name"])
             continue
 
         store_call_id = create_store_call(ticket_id, store["id"])
+
+        if test_mode:
+            logger.info(
+                "TEST MODE: calling %s instead of real store %s (%s)",
+                phone, store["store_name"], store.get("phone_number"),
+            )
 
         try:
             vapi_result = await create_store_phone_call(
@@ -76,7 +90,7 @@ async def call_stores(ticket_id: str, product: dict[str, Any], location: str) ->
 
             log_tool_call(
                 ticket_id, "vapi_create_store_call",
-                {"store": store["store_name"], "phone": phone},
+                {"store": store["store_name"], "phone": phone, "test_mode": test_mode},
                 vapi_result,
                 status="success" if vapi_result.get("success") else "error",
                 error_message=vapi_result.get("error"),
@@ -96,7 +110,7 @@ async def call_stores(ticket_id: str, product: dict[str, Any], location: str) ->
             update_store_call_status(store_call_id, "failed")
             log_tool_call(
                 ticket_id, "vapi_create_store_call",
-                {"store": store["store_name"], "phone": phone},
+                {"store": store["store_name"], "phone": phone, "test_mode": test_mode},
                 {"error": str(e)},
                 status="error", error_message=str(e), store_call_id=store_call_id,
             )

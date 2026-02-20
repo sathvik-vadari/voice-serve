@@ -18,7 +18,10 @@ DEFAULT_USER_ID = "default_user"
 def schedule_wakeup_call(minutes: int, user_id: Optional[str] = None) -> Dict[str, Any]:
     try:
         from app.db.wakeup import schedule_wakeup_in_minutes
+        from app.services.wakeup_scheduler import normalize_phone
         uid = user_id or DEFAULT_USER_ID
+        if uid != DEFAULT_USER_ID:
+            uid = normalize_phone(uid)
         return schedule_wakeup_in_minutes(uid, minutes)
     except Exception as e:
         logger.exception("schedule_wakeup_call failed")

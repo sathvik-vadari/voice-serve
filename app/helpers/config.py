@@ -43,6 +43,10 @@ class Config:
     MAX_STORES_TO_CALL: int = int(os.getenv("MAX_STORES_TO_CALL", "5"))
     MAX_ALTERNATIVES: int = int(os.getenv("MAX_ALTERNATIVES", "3"))
 
+    # Test mode
+    TEST_MODE: bool = os.getenv("TEST_MODE", "false").lower() in ("true", "1", "yes")
+    TEST_PHONE: str = os.getenv("TEST_PHONE", "")
+
     @classmethod
     def validate(cls) -> None:
         """No required config at startup; missing values are handled at call time."""

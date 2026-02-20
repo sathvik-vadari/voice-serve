@@ -1,21 +1,34 @@
 """Background scheduler: when a wake-up call is due, place it via VAPI."""
 import asyncio
-import logging
-from datetime import datetime, timezone
+import re
 
 from app.db.wakeup import get_pending_scheduled_calls, mark_scheduled_call_done
 from app.helpers.config import Config
+from app.helpers.logger import setup_logger
 from app.helpers.prompt_loader import PromptLoader
 from app.services.vapi_client import create_phone_call
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 CHECK_INTERVAL_SEC = 30
 _task: asyncio.Task | None = None
 
 
+def normalize_phone(number: str) -> str:
+    """Ensure the number is in international format (+91... for Indian numbers)."""
+    n = re.sub(r"[\s\-\(\)]", "", number.strip())
+    if n.startswith("+"):
+        return n
+    # Bare 10-digit Indian mobile number
+    if n.isdigit() and len(n) == 10:
+        return f"+91{n}"
+    # 0-prefixed Indian number
+    if n.startswith("0") and len(n) == 11:
+        return f"+91{n[1:]}"
+    return n
+
+
 def _is_phone_number(s: str) -> bool:
-    """True if string looks like a callback phone number."""
     if not s or not isinstance(s, str):
         return False
     s = s.strip()
@@ -25,42 +38,53 @@ def _is_phone_number(s: str) -> bool:
 
 
 async def _run_scheduler() -> None:
-    """Loop: every CHECK_INTERVAL_SEC, fetch due scheduled calls and create VAPI outbound calls."""
     if not Config.VAPI_API_KEY or not Config.VAPI_PHONE_NUMBER_ID:
         logger.info("VAPI not configured; wake-up scheduler will not place outbound calls")
         return
     prompt_loader = PromptLoader()
     system_prompt = prompt_loader.get_default_prompt()
+
+    logger.info("Scheduler loop started (checking every %ds)", CHECK_INTERVAL_SEC)
+
     while True:
         try:
             pending = get_pending_scheduled_calls()
+            if pending:
+                logger.info("Scheduler found %d pending call(s)", len(pending))
             for item in pending:
                 call_id = item["id"]
                 user_identifier = item["user_identifier"]
                 scheduled_at = item["scheduled_at"]
+
                 if not _is_phone_number(user_identifier):
-                    logger.error("Skipping scheduled call id=%s: user_identifier %r is not a phone number (callback would fail).", call_id, user_identifier)
+                    logger.error(
+                        "Skipping call id=%s: %r is not a valid phone number",
+                        call_id, user_identifier,
+                    )
                     mark_scheduled_call_done(call_id)
                     continue
-                logger.info("Placing scheduled wake-up call: user=%s scheduled_at=%s", user_identifier, scheduled_at)
-                result = await create_phone_call(user_identifier, system_prompt)
+
+                phone = normalize_phone(user_identifier)
+                logger.info("Placing scheduled call id=%s to %s (scheduled_at=%s)", call_id, phone, scheduled_at)
+
+                result = await create_phone_call(phone, system_prompt)
                 if result.get("success"):
                     mark_scheduled_call_done(call_id)
-                    logger.info("VAPI outbound call created for %s (call_id=%s)", user_identifier, call_id)
+                    logger.info("VAPI call placed for %s (call_id=%s)", phone, call_id)
                 else:
                     logger.error(
-                        "VAPI wake-up call FAILED for %s - not marking done so you can retry. Error: %s Body: %s",
-                        user_identifier,
-                        result.get("error"),
-                        result.get("body", ""),
+                        "VAPI call FAILED for %s (call_id=%s): %s | %s",
+                        phone, call_id, result.get("error"), result.get("body", ""),
                     )
+                    # Mark done even on failure to avoid infinite retry loop
+                    mark_scheduled_call_done(call_id)
+
         except Exception as e:
-            logger.exception("Wake-up scheduler iteration failed: %s", e)
+            logger.exception("Scheduler iteration error: %s", e)
         await asyncio.sleep(CHECK_INTERVAL_SEC)
 
 
 def start_wakeup_scheduler() -> asyncio.Task | None:
-    """Start the background scheduler. Returns the task so it can be cancelled on shutdown."""
     global _task
     if _task is not None and not _task.done():
         return _task
@@ -70,7 +94,6 @@ def start_wakeup_scheduler() -> asyncio.Task | None:
 
 
 def stop_wakeup_scheduler() -> None:
-    """Cancel the scheduler task."""
     global _task
     if _task and not _task.done():
         _task.cancel()
