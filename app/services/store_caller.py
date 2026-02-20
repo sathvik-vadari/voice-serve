@@ -5,6 +5,7 @@ from typing import Any
 
 from app.helpers.config import Config
 from app.helpers.prompt_loader import PromptLoader
+from app.helpers.regional import detect_region
 from app.db.tickets import (
     create_store_call,
     update_store_call_vapi_id,
@@ -17,10 +18,15 @@ from app.services.vapi_client import create_store_phone_call
 logger = logging.getLogger(__name__)
 
 
-def _build_store_prompt(product: dict[str, Any], location: str) -> str:
-    """Fill the store_caller prompt template with product details."""
+def _build_store_prompt(product: dict[str, Any], location: str) -> tuple[str, dict[str, Any]]:
+    """
+    Fill the store_caller prompt template with product details and regional context.
+    Returns (prompt_string, regional_profile).
+    """
     loader = PromptLoader()
     template = loader.load_prompt("store_caller") or ""
+
+    region = detect_region(location)
 
     specs_str = json.dumps(product.get("specs") or {}, indent=2)
     alts = product.get("alternatives") or []
@@ -33,7 +39,14 @@ def _build_store_prompt(product: dict[str, Any], location: str) -> str:
     prompt = prompt.replace("{product_specs}", specs_str)
     prompt = prompt.replace("{alternatives}", alts_str)
     prompt = prompt.replace("{location}", location)
-    return prompt
+    prompt = prompt.replace("{city}", region.get("display_name", "India"))
+    prompt = prompt.replace("{regional_language}", region.get("regional_language", "hindi"))
+    prompt = prompt.replace("{greeting}", region.get("greeting", "Namaste ji! Main Faff ki taraf se call kar raha hoon."))
+    prompt = prompt.replace("{communication_style}", region.get("communication_style", "Speak in Hindi mixed with English."))
+    prompt = prompt.replace("{thank_you}", region.get("thank_you", "Bahut dhanyavaad ji!"))
+    prompt = prompt.replace("{busy_response}", region.get("busy_response", "Koi baat nahi ji, dhanyavaad!"))
+
+    return prompt, region
 
 
 async def call_stores(
@@ -51,13 +64,12 @@ async def call_stores(
         logger.warning("No stores to call for ticket %s", ticket_id)
         return []
 
-    prompt = _build_store_prompt(product, location)
+    prompt, region = _build_store_prompt(product, location)
     results = []
 
     targets = stores if not test_mode else stores[:1]
 
     for store in targets:
-        # In test mode override the phone number
         phone = test_phone if test_mode else store.get("phone_number")
         if not phone:
             logger.warning("Skipping store %s – no phone number", store["store_name"])
@@ -77,6 +89,7 @@ async def call_stores(
                 system_prompt=prompt,
                 ticket_id=ticket_id,
                 store_call_id=store_call_id,
+                region=region,
             )
 
             if vapi_result.get("success"):
@@ -90,7 +103,7 @@ async def call_stores(
 
             log_tool_call(
                 ticket_id, "vapi_create_store_call",
-                {"store": store["store_name"], "phone": phone, "test_mode": test_mode},
+                {"store": store["store_name"], "phone": phone, "test_mode": test_mode, "region": region.get("region_key")},
                 vapi_result,
                 status="success" if vapi_result.get("success") else "error",
                 error_message=vapi_result.get("error"),

@@ -203,6 +203,18 @@ def save_stores(ticket_id: str, stores: list[dict[str, Any]]) -> list[int]:
     return ids
 
 
+def update_store_priorities(ticket_id: str, ordered_place_ids: list[str]) -> None:
+    """Re-order stores by updating call_priority based on the given place_id order."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            for priority, place_id in enumerate(ordered_place_ids, 1):
+                cur.execute(
+                    """UPDATE ticket_stores SET call_priority = %s
+                       WHERE ticket_id = %s AND place_id = %s""",
+                    (priority, ticket_id, place_id),
+                )
+
+
 def get_stores(ticket_id: str) -> list[dict[str, Any]]:
     with get_connection() as conn:
         with conn.cursor() as cur:

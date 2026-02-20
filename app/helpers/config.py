@@ -30,6 +30,10 @@ class Config:
     # Google Maps Places API
     GOOGLE_MAPS_API_KEY: Optional[str] = os.getenv("GOOGLE_MAPS_API_KEY")
 
+    # Google Gemini (query intelligence, store enrichment)
+    GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
     # VAPI (voice AI phone calls)
     VAPI_API_KEY: Optional[str] = os.getenv("VAPI_API_KEY")
     VAPI_PHONE_NUMBER_ID: Optional[str] = os.getenv("VAPI_PHONE_NUMBER_ID")
@@ -38,6 +42,8 @@ class Config:
     VAPI_MODEL: str = os.getenv("VAPI_MODEL", "gpt-4o")
     VAPI_VOICE_PROVIDER: Optional[str] = os.getenv("VAPI_VOICE_PROVIDER")
     VAPI_VOICE: str = os.getenv("VAPI_VOICE", "alloy")
+    VAPI_VOICE_MODEL: Optional[str] = os.getenv("VAPI_VOICE_MODEL")
+    VAPI_VOICE_LANGUAGE: str = os.getenv("VAPI_VOICE_LANGUAGE", "hi")
 
     # Limits
     MAX_STORES_TO_CALL: int = int(os.getenv("MAX_STORES_TO_CALL", "5"))

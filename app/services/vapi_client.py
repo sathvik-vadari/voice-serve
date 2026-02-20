@@ -12,25 +12,59 @@ logger = logging.getLogger(__name__)
 VAPI_CALL_PHONE_URL = "https://api.vapi.ai/call/phone"
 
 
+def _build_transcriber_config() -> dict[str, Any]:
+    """Deepgram nova-3 with multi-language support for Hindi/English code-switching."""
+    return {
+        "provider": "deepgram",
+        "model": "nova-3",
+        "language": "multi",
+        "smartFormat": True,
+    }
+
+
+def _build_voice_config(language_override: str | None = None) -> dict[str, Any] | str:
+    """
+    Build the VAPI voice config from env settings.
+
+    For Cartesia: includes provider, voiceId, and language.
+    For OpenAI/others: includes provider and voiceId.
+    Language can be overridden per-call for regional support.
+    """
+    provider = Config.VAPI_VOICE_PROVIDER
+    if not provider:
+        return Config.VAPI_VOICE
+
+    voice: dict[str, Any] = {
+        "provider": provider,
+        "voiceId": Config.VAPI_VOICE,
+    }
+
+    if provider == "cartesia":
+        voice["language"] = language_override or Config.VAPI_VOICE_LANGUAGE
+
+    return voice
+
+
 # ---------------------------------------------------------------------------
-# Wake-up call assistant (existing)
+# Wake-up call assistant
 # ---------------------------------------------------------------------------
 
 def _get_wakeup_assistant(server_url: str, system_prompt: str, *, include_server_url: bool = True) -> dict[str, Any]:
     base = (server_url or "").rstrip("/")
     webhook_url = f"{base}/api/vapi/webhook" if base else ""
-    voice_config: Any = Config.VAPI_VOICE
-    if Config.VAPI_VOICE_PROVIDER:
-        voice_config = {"provider": Config.VAPI_VOICE_PROVIDER, "voiceId": Config.VAPI_VOICE}
     assistant: dict[str, Any] = {
         "firstMessage": "Hi, this is your wake-up call. How can I help you today?",
+        "transcriber": _build_transcriber_config(),
         "model": {
             "provider": Config.VAPI_MODEL_PROVIDER,
             "model": Config.VAPI_MODEL,
             "messages": [{"role": "system", "content": system_prompt}],
             "functions": [t["function"] for t in get_vapi_wakeup_tools()],
         },
-        "voice": voice_config,
+        "voice": _build_voice_config(),
+        "endCallFunctionEnabled": True,
+        "endCallMessage": "Goodbye, have a great day!",
+        "maxDurationSeconds": 120,
     }
     if include_server_url and webhook_url:
         assistant["serverUrl"] = webhook_url
@@ -47,17 +81,29 @@ def get_wakeup_assistant_for_webhook(server_url: str, system_prompt: str) -> dic
 
 
 # ---------------------------------------------------------------------------
-# Store inquiry assistant (new)
+# Store inquiry assistant (regional-aware)
 # ---------------------------------------------------------------------------
 
-def _get_store_assistant(server_url: str, system_prompt: str) -> dict[str, Any]:
+def _get_store_assistant(
+    server_url: str,
+    system_prompt: str,
+    region: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     base = (server_url or "").rstrip("/")
     webhook_url = f"{base}/api/vapi/store-webhook" if base else ""
-    voice_config: Any = Config.VAPI_VOICE
-    if Config.VAPI_VOICE_PROVIDER:
-        voice_config = {"provider": Config.VAPI_VOICE_PROVIDER, "voiceId": Config.VAPI_VOICE}
+
+    region_lang = region.get("voice_language") if region else None
+    voice_config = _build_voice_config(language_override=region_lang)
+
+    first_message = (
+        "Hello, I'm calling to check if you have a product in stock. Do you have a moment?"
+    )
+    if region and region.get("first_message"):
+        first_message = region["first_message"]
+
     assistant: dict[str, Any] = {
-        "firstMessage": "Hello, I'm calling to check if you have a product in stock. Do you have a moment?",
+        "firstMessage": first_message,
+        "transcriber": _build_transcriber_config(),
         "model": {
             "provider": Config.VAPI_MODEL_PROVIDER,
             "model": Config.VAPI_MODEL,
@@ -65,6 +111,9 @@ def _get_store_assistant(server_url: str, system_prompt: str) -> dict[str, Any]:
             "functions": [t["function"] for t in get_store_call_tools()],
         },
         "voice": voice_config,
+        "endCallFunctionEnabled": True,
+        "endCallMessage": "Thank you, goodbye!",
+        "maxDurationSeconds": 300,
     }
     if webhook_url:
         assistant["serverUrl"] = webhook_url
@@ -124,8 +173,9 @@ async def create_store_phone_call(
     system_prompt: str,
     ticket_id: str,
     store_call_id: int,
+    region: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create an outbound store inquiry phone call."""
+    """Create an outbound store inquiry phone call with regional voice config."""
     server_url = Config.VAPI_SERVER_URL or ""
-    assistant = _get_store_assistant(server_url, system_prompt)
+    assistant = _get_store_assistant(server_url, system_prompt, region=region)
     return await _place_call(assistant, customer_number)

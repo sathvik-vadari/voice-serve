@@ -19,6 +19,7 @@ from app.services.orchestrator import classify_query
 from app.services.product_research import research_product
 from app.services.google_maps import find_stores
 from app.services.store_caller import call_stores
+from app.services.gemini_client import analyze_query, rerank_stores
 
 logger = setup_logger(__name__)
 
@@ -182,24 +183,61 @@ async def _handle_order(
     ticket_id: str, query: str, location: str,
     *, test_mode: bool = False, test_phone: Optional[str] = None,
 ) -> None:
-    """Handle order/product flow: research → find stores → call stores."""
-    # Step 2a: Product research
+    """Handle order/product flow: analyze → research → find stores → rerank → call."""
+
+    # Step 2a: Gemini query intelligence
+    query_analysis = None
+    try:
+        update_ticket_status(ticket_id, "analyzing")
+        query_analysis = await analyze_query(ticket_id, query, location)
+        logger.info(
+            "Ticket %s query analysis: type=%s, specific_store=%s, queries=%s",
+            ticket_id,
+            query_analysis.get("query_type"),
+            query_analysis.get("specific_store_name"),
+            query_analysis.get("search_queries"),
+        )
+    except Exception as e:
+        logger.warning("Gemini query analysis failed for ticket %s, continuing without it: %s", ticket_id, e)
+
+    # Step 2b: Product research (with query analysis context)
     update_ticket_status(ticket_id, "researching")
-    product = await research_product(ticket_id, query)
+    product = await research_product(ticket_id, query, query_analysis=query_analysis)
     logger.info(
-        "Ticket %s product: %s (avg ₹%s, %d alternatives)",
+        "Ticket %s product: %s (specific_store=%s, avg ₹%s, %d alternatives)",
         ticket_id, product.get("product_name"),
+        product.get("is_specific_store"),
         product.get("avg_price_online"), len(product.get("alternatives") or []),
     )
 
-    # Step 2b: Find stores via Google Maps
+    # Step 2c: Find stores via Google Maps (multi-strategy)
     update_ticket_status(ticket_id, "finding_stores")
+
+    search_queries = None
+    if query_analysis and query_analysis.get("search_queries"):
+        search_queries = query_analysis["search_queries"]
+    elif product.get("_search_queries"):
+        search_queries = product["_search_queries"]
+
     stores = await find_stores(
         ticket_id,
         product.get("store_search_query", "store"),
         location,
+        search_queries=search_queries,
     )
     logger.info("Ticket %s: found %d callable stores", ticket_id, len(stores))
+
+    # Step 2d: Gemini re-ranking (prioritize exact store matches)
+    if query_analysis and stores and len(stores) > 1:
+        try:
+            reranked = await rerank_stores(ticket_id, query, stores, query_analysis)
+            ordered_place_ids = [s.get("place_id") for s in reranked if s.get("place_id")]
+            if ordered_place_ids:
+                from app.db.tickets import update_store_priorities
+                update_store_priorities(ticket_id, ordered_place_ids)
+            logger.info("Ticket %s: stores re-ranked by Gemini", ticket_id)
+        except Exception as e:
+            logger.warning("Store re-ranking failed for ticket %s: %s", ticket_id, e)
 
     if not stores:
         from app.db.tickets import set_ticket_final_result
@@ -210,9 +248,8 @@ async def _handle_order(
         })
         return
 
-    # Step 2c: Call stores via VAPI
+    # Step 2e: Call stores via VAPI
     if test_mode:
-        # In test mode: log all store info but only call the test number once
         logger.info(
             "TEST MODE: Found %d stores but will only call test number %s",
             len(stores), test_phone,
