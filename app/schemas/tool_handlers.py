@@ -1,46 +1,23 @@
-"""Tool handler functions for VoiceLive function calling."""
+"""Tool handler functions for VAPI function calling (wakeup + store calls)."""
 import json
 import logging
+import time
 from typing import Dict, Any, Optional
+
+from app.db.tickets import log_tool_call, get_store_call_by_vapi_id
 
 logger = logging.getLogger(__name__)
 
-# Default user when no phone/user_id is provided (e.g. testing or before VAPI supplies it)
 DEFAULT_USER_ID = "default_user"
 
 
-# --- Perplexity search: commented out for wake-up agent; uncomment to re-enable ---
-# async def search_perplexity(query: str) -> Dict[str, Any]:
-#     api_key = Config.PERPLEXITY_API_KEY
-#     if not api_key:
-#         logger.error("PERPLEXITY_API_KEY not configured")
-#         return {"error": "Perplexity API key not configured", "query": query}
-#     url = "https://api.perplexity.ai/chat/completions"
-#     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-#     payload = {
-#         "model": "llama-3.1-sonar-large-128k-online",
-#         "messages": [{"role": "system", "content": "Be precise and concise."}, {"role": "user", "content": query}],
-#         "temperature": 0.2,
-#         "max_tokens": 1000,
-#     }
-#     try:
-#         async with aiohttp.ClientSession() as session:
-#             async with session.post(url, headers=headers, json=payload) as response:
-#                 if response.status == 200:
-#                     data = await response.json()
-#                     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-#                     return {"query": query, "result": content, "success": True}
-#                 error_text = await response.text()
-#                 return {"query": query, "error": f"API returned status {response.status}", "success": False}
-#     except Exception as e:
-#         return {"query": query, "error": str(e), "success": False}
-
+# ---------------------------------------------------------------------------
+# Wake-up call handlers (unchanged)
+# ---------------------------------------------------------------------------
 
 def schedule_wakeup_call(minutes: int, user_id: Optional[str] = None) -> Dict[str, Any]:
-    """Schedule a one-off wake-up call in `minutes`. Called by tool with user_id from args."""
     try:
         from app.db.wakeup import schedule_wakeup_in_minutes
-
         uid = user_id or DEFAULT_USER_ID
         return schedule_wakeup_in_minutes(uid, minutes)
     except Exception as e:
@@ -49,10 +26,8 @@ def schedule_wakeup_call(minutes: int, user_id: Optional[str] = None) -> Dict[st
 
 
 def never_call_again(user_id: Optional[str] = None) -> Dict[str, Any]:
-    """Opt user out of all future wake-up calls."""
     try:
         from app.db.wakeup import set_never_call_again
-
         uid = user_id or DEFAULT_USER_ID
         return set_never_call_again(uid)
     except Exception as e:
@@ -60,57 +35,142 @@ def never_call_again(user_id: Optional[str] = None) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-def set_daily_wakeup_time_handler(time: str, user_id: Optional[str] = None) -> Dict[str, Any]:
-    """Set or change daily wake-up time. Param name 'time' to match schema."""
+def set_daily_wakeup_time_handler(time_str: str, user_id: Optional[str] = None) -> Dict[str, Any]:
     try:
         from app.db.wakeup import set_daily_wakeup_time
-
         uid = user_id or DEFAULT_USER_ID
-        return set_daily_wakeup_time(uid, time)
+        return set_daily_wakeup_time(uid, time_str)
     except Exception as e:
         logger.exception("set_daily_wakeup_time failed")
         return {"success": False, "error": str(e)}
 
 
-# Tool registry - maps function names to actual handler functions
-TOOL_HANDLERS: Dict[str, Any] = {
-    "schedule_wakeup_call": lambda **kwargs: schedule_wakeup_call(
-        minutes=kwargs["minutes"], user_id=kwargs.get("user_id")
+# ---------------------------------------------------------------------------
+# Store call handlers – called during VAPI store inquiry calls
+# ---------------------------------------------------------------------------
+
+def report_product_availability(
+    product_name: str, available: bool,
+    price: Optional[float] = None, notes: Optional[str] = None,
+    _vapi_call_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    result = {
+        "success": True,
+        "message": f"Noted: {product_name} is {'available' if available else 'not available'}."
+        + (f" Price: ₹{price}" if price else ""),
+    }
+    _log_store_tool("report_product_availability", {
+        "product_name": product_name, "available": available, "price": price, "notes": notes,
+    }, result, _vapi_call_id)
+    return result
+
+
+def report_delivery_info(
+    delivers: bool,
+    eta: Optional[str] = None, delivery_mode: Optional[str] = None,
+    delivery_charge: Optional[float] = None,
+    _vapi_call_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    result = {
+        "success": True,
+        "message": f"Noted: delivery {'available' if delivers else 'not available'}."
+        + (f" ETA: {eta}" if eta else ""),
+    }
+    _log_store_tool("report_delivery_info", {
+        "delivers": delivers, "eta": eta, "delivery_mode": delivery_mode,
+        "delivery_charge": delivery_charge,
+    }, result, _vapi_call_id)
+    return result
+
+
+def report_alternative_product(
+    alternative_name: str, available: bool,
+    price: Optional[float] = None, notes: Optional[str] = None,
+    _vapi_call_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    result = {
+        "success": True,
+        "message": f"Noted: alternative {alternative_name} is {'available' if available else 'not available'}."
+        + (f" Price: ₹{price}" if price else ""),
+    }
+    _log_store_tool("report_alternative_product", {
+        "alternative_name": alternative_name, "available": available, "price": price, "notes": notes,
+    }, result, _vapi_call_id)
+    return result
+
+
+def _log_store_tool(tool_name: str, params: dict, result: dict, vapi_call_id: Optional[str]) -> None:
+    """Persist tool call log for a store call."""
+    if not vapi_call_id:
+        return
+    try:
+        sc = get_store_call_by_vapi_id(vapi_call_id)
+        if sc:
+            log_tool_call(
+                ticket_id=sc["ticket_id"], tool_name=tool_name,
+                input_params=params, output_result=result,
+                store_call_id=sc["id"],
+            )
+    except Exception:
+        logger.exception("Failed to log store tool call")
+
+
+# ---------------------------------------------------------------------------
+# Tool registries
+# ---------------------------------------------------------------------------
+
+WAKEUP_TOOL_HANDLERS: Dict[str, Any] = {
+    "schedule_wakeup_call": lambda **kw: schedule_wakeup_call(
+        minutes=kw["minutes"], user_id=kw.get("user_id"),
     ),
-    "never_call_again": lambda **kwargs: never_call_again(user_id=kwargs.get("user_id")),
-    "set_daily_wakeup_time": lambda **kwargs: set_daily_wakeup_time_handler(
-        time=kwargs["time"], user_id=kwargs.get("user_id")
+    "never_call_again": lambda **kw: never_call_again(user_id=kw.get("user_id")),
+    "set_daily_wakeup_time": lambda **kw: set_daily_wakeup_time_handler(
+        time_str=kw["time"], user_id=kw.get("user_id"),
     ),
-    # "search_perplexity": search_perplexity,  # Commented out; uncomment to re-enable
 }
 
+STORE_TOOL_HANDLERS: Dict[str, Any] = {
+    "report_product_availability": lambda **kw: report_product_availability(
+        product_name=kw["product_name"], available=kw["available"],
+        price=kw.get("price"), notes=kw.get("notes"),
+        _vapi_call_id=kw.get("_vapi_call_id"),
+    ),
+    "report_delivery_info": lambda **kw: report_delivery_info(
+        delivers=kw["delivers"], eta=kw.get("eta"),
+        delivery_mode=kw.get("delivery_mode"), delivery_charge=kw.get("delivery_charge"),
+        _vapi_call_id=kw.get("_vapi_call_id"),
+    ),
+    "report_alternative_product": lambda **kw: report_alternative_product(
+        alternative_name=kw["alternative_name"], available=kw["available"],
+        price=kw.get("price"), notes=kw.get("notes"),
+        _vapi_call_id=kw.get("_vapi_call_id"),
+    ),
+}
 
-async def execute_tool(function_name: str, arguments: str) -> Dict[str, Any]:
+# Combined registry (backward compat)
+TOOL_HANDLERS: Dict[str, Any] = {**WAKEUP_TOOL_HANDLERS, **STORE_TOOL_HANDLERS}
+
+
+async def execute_tool(function_name: str, arguments: str, extra_context: dict | None = None) -> Dict[str, Any]:
     """
     Execute a tool function with the given arguments.
-    
-    Args:
-        function_name: Name of the function to call
-        arguments: JSON string of function arguments
-        
-    Returns:
-        Dictionary with function result
+    extra_context can carry _vapi_call_id and similar metadata.
     """
-    # Parse arguments
     try:
         args = json.loads(arguments)
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse arguments for {function_name}: {e}")
+        logger.error("Failed to parse arguments for %s: %s", function_name, e)
         return {"error": f"Invalid JSON arguments: {e}"}
-    
-    # Get the handler
+
+    if extra_context:
+        args.update(extra_context)
+
     if function_name not in TOOL_HANDLERS:
-        logger.error(f"Unknown function: {function_name}")
+        logger.error("Unknown function: %s", function_name)
         return {"error": f"Unknown function: {function_name}"}
-    
+
     handler = TOOL_HANDLERS[function_name]
-    
-    # Call the handler
+
     try:
         import asyncio
         if asyncio.iscoroutinefunction(handler):
@@ -119,6 +179,5 @@ async def execute_tool(function_name: str, arguments: str) -> Dict[str, Any]:
             result = handler(**args)
         return result
     except Exception as e:
-        logger.error(f"Error executing function {function_name}: {e}", exc_info=True)
+        logger.error("Error executing function %s: %s", function_name, e, exc_info=True)
         return {"error": str(e)}
-
