@@ -114,6 +114,7 @@ def _get_store_assistant(
         "endCallFunctionEnabled": True,
         "endCallMessage": "Thank you, goodbye!",
         "maxDurationSeconds": 300,
+        "silenceTimeoutSeconds": 5,
     }
     if webhook_url:
         assistant["serverUrl"] = webhook_url
