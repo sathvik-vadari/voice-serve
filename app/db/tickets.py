@@ -12,15 +12,50 @@ logger = logging.getLogger(__name__)
 # Tickets
 # ---------------------------------------------------------------------------
 
+def get_next_ticket_id() -> str:
+    """Generate the next ticket ID by finding the highest existing TKT-NNN and incrementing."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT ticket_id FROM tickets
+                   WHERE ticket_id LIKE 'TKT-%%'
+                   ORDER BY created_at DESC, id DESC LIMIT 1""",
+            )
+            row = cur.fetchone()
+    if not row:
+        return "TKT-001"
+    last_id = row[0]
+    try:
+        num = int(last_id.split("-", 1)[1])
+        return f"TKT-{num + 1:03d}"
+    except (ValueError, IndexError):
+        return "TKT-001"
+
+
+def ticket_exists_and_active(ticket_id: str) -> bool:
+    """Check if a ticket already exists and is still being processed."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT status FROM tickets WHERE ticket_id = %s",
+                (ticket_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return False
+    active_statuses = (
+        "received", "classifying", "analyzing", "researching",
+        "finding_stores", "calling_stores", "wakeup_calling", "wakeup_in_progress",
+    )
+    return row[0] in active_statuses
+
+
 def create_ticket(ticket_id: str, query: str, location: str, user_phone: Optional[str] = None) -> dict[str, Any]:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO tickets (ticket_id, query, location, user_phone, status)
                    VALUES (%s, %s, %s, %s, 'received')
-                   ON CONFLICT (ticket_id) DO UPDATE
-                       SET query = EXCLUDED.query, location = EXCLUDED.location,
-                           user_phone = EXCLUDED.user_phone, updated_at = NOW()
                    RETURNING id, ticket_id, status, created_at""",
                 (ticket_id, query, location, user_phone),
             )
@@ -188,6 +223,17 @@ def save_stores(ticket_id: str, stores: list[dict[str, Any]]) -> list[int]:
     with get_connection() as conn:
         with conn.cursor() as cur:
             for idx, s in enumerate(stores):
+                place_id = s.get("place_id")
+                if place_id:
+                    cur.execute(
+                        "SELECT id FROM ticket_stores WHERE ticket_id = %s AND place_id = %s",
+                        (ticket_id, place_id),
+                    )
+                    existing = cur.fetchone()
+                    if existing:
+                        ids.append(existing[0])
+                        continue
+
                 cur.execute(
                     """INSERT INTO ticket_stores
                            (ticket_id, store_name, address, phone_number,
@@ -195,7 +241,7 @@ def save_stores(ticket_id: str, stores: list[dict[str, Any]]) -> list[int]:
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                     (
                         ticket_id, s["name"], s.get("address"), s.get("phone_number"),
-                        s.get("rating"), s.get("total_ratings"), s.get("place_id"),
+                        s.get("rating"), s.get("total_ratings"), place_id,
                         s.get("latitude"), s.get("longitude"), idx + 1,
                     ),
                 )
@@ -219,18 +265,22 @@ def get_stores(ticket_id: str) -> list[dict[str, Any]]:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, store_name, address, phone_number, rating, total_ratings,
+                """SELECT DISTINCT ON (place_id)
+                          id, store_name, address, phone_number, rating, total_ratings,
                           place_id, call_priority
-                   FROM ticket_stores WHERE ticket_id = %s ORDER BY call_priority""",
+                   FROM ticket_stores WHERE ticket_id = %s
+                   ORDER BY place_id, call_priority, id""",
                 (ticket_id,),
             )
             rows = cur.fetchall()
-    return [
+    stores = [
         {"id": r[0], "store_name": r[1], "address": r[2], "phone_number": r[3],
          "rating": float(r[4]) if r[4] else None, "total_ratings": r[5],
          "place_id": r[6], "call_priority": r[7]}
         for r in rows
     ]
+    stores.sort(key=lambda s: s["call_priority"] or 999)
+    return stores
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +349,13 @@ def save_store_call_transcript(vapi_call_id: str, transcript: str) -> Optional[i
 
 
 def save_store_call_analysis(call_id: int, analysis: dict[str, Any]) -> None:
+    notes_parts = []
+    if analysis.get("call_summary"):
+        notes_parts.append(analysis["call_summary"])
+    if analysis.get("notes"):
+        notes_parts.append(analysis["notes"])
+    combined_notes = " | ".join(notes_parts) if notes_parts else None
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -326,7 +383,7 @@ def save_store_call_analysis(call_id: int, analysis: dict[str, Any]) -> None:
                     analysis.get("delivery_mode"),
                     analysis.get("delivery_charge"),
                     analysis.get("product_match_type"),
-                    analysis.get("notes"),
+                    combined_notes,
                     call_id,
                 ),
             )

@@ -9,6 +9,8 @@ from app.helpers.logger import setup_logger
 from app.db.tickets import (
     create_ticket,
     get_ticket,
+    get_next_ticket_id,
+    ticket_exists_and_active,
     update_ticket_status,
     update_ticket_query_type,
     get_store_calls_for_ticket,
@@ -29,7 +31,7 @@ router = APIRouter(tags=["tickets"])
 class TicketRequest(BaseModel):
     query: str
     location: str
-    ticket_id: str
+    ticket_id: Optional[str] = None
     user_phone: str
     test_mode: Optional[bool] = None
     test_phone: Optional[str] = None
@@ -51,10 +53,22 @@ async def create_ticket_endpoint(req: TicketRequest, bg: BackgroundTasks):
     Accept a user query from the frontend, classify it, and kick off the
     appropriate pipeline (wakeup or order) in the background.
     """
-    create_ticket(req.ticket_id, req.query, req.location, req.user_phone)
-    logger.info("Ticket %s created: query=%r location=%r", req.ticket_id, req.query, req.location)
+    ticket_id = req.ticket_id.strip() if req.ticket_id else ""
 
-    # Resolve test mode: request body overrides .env
+    if not ticket_id:
+        ticket_id = get_next_ticket_id()
+        logger.info("Auto-generated ticket_id: %s", ticket_id)
+
+    if ticket_exists_and_active(ticket_id):
+        return TicketResponse(
+            ticket_id=ticket_id,
+            status="rejected",
+            message=f"Ticket {ticket_id} is already being processed. Wait for it to complete or use a new ticket ID.",
+        )
+
+    create_ticket(ticket_id, req.query, req.location, req.user_phone)
+    logger.info("Ticket %s created: query=%r location=%r", ticket_id, req.query, req.location)
+
     is_test = req.test_mode if req.test_mode is not None else Config.TEST_MODE
     test_phone = req.test_phone or Config.TEST_PHONE or None
 
@@ -62,12 +76,12 @@ async def create_ticket_endpoint(req: TicketRequest, bg: BackgroundTasks):
         logger.info("TEST MODE active (phone=%s) – will not call real stores", test_phone)
 
     bg.add_task(
-        _process_ticket, req.ticket_id, req.query, req.location, req.user_phone,
+        _process_ticket, ticket_id, req.query, req.location, req.user_phone,
         test_mode=is_test, test_phone=test_phone,
     )
 
     return TicketResponse(
-        ticket_id=req.ticket_id,
+        ticket_id=ticket_id,
         status="processing",
         message="Ticket received. Processing started.",
     )

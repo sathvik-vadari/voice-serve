@@ -45,6 +45,12 @@ class Config:
     VAPI_VOICE_MODEL: Optional[str] = os.getenv("VAPI_VOICE_MODEL")
     VAPI_VOICE_LANGUAGE: str = os.getenv("VAPI_VOICE_LANGUAGE", "hi")
 
+    # VAPI latency tuning
+    VAPI_ENDPOINTING_MS: int = int(os.getenv("VAPI_ENDPOINTING_MS", "255"))
+    VAPI_BACKGROUND_DENOISING: bool = os.getenv("VAPI_BACKGROUND_DENOISING", "true").lower() in ("true", "1", "yes")
+    VAPI_START_SPEAKING_WAIT: float = float(os.getenv("VAPI_START_SPEAKING_WAIT", "0.4"))
+    VAPI_NUM_WORDS_TO_INTERRUPT: int = int(os.getenv("VAPI_NUM_WORDS_TO_INTERRUPT", "0"))
+
     # Limits
     MAX_STORES_TO_CALL: int = int(os.getenv("MAX_STORES_TO_CALL", "5"))
     MAX_ALTERNATIVES: int = int(os.getenv("MAX_ALTERNATIVES", "3"))

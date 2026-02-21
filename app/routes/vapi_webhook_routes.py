@@ -85,6 +85,50 @@ def _extract_tool_call_list(body: dict) -> list:
     return tcl if isinstance(tcl, list) else []
 
 
+def _handle_live_transcript(body: dict, call_label: str, vapi_call_id: Optional[str]) -> bool:
+    """
+    Handle real-time VAPI events (transcript, conversation-update, status-update,
+    speech-update). Returns True if the event was handled and the caller should
+    return early.
+    """
+    msg = body.get("message") or {}
+    msg_type = msg.get("type") or ""
+    tag = f"[{call_label}:{vapi_call_id or '?'}]"
+
+    if msg_type == "transcript":
+        role = msg.get("role") or "?"
+        text = msg.get("transcript") or ""
+        ttype = msg.get("transcriptType") or "partial"
+        if ttype == "final":
+            logger.info("%s 🎙  %s: %s", tag, role.upper(), text)
+        else:
+            logger.debug("%s 🎙  %s (partial): %s", tag, role.upper(), text)
+        return True
+
+    if msg_type == "conversation-update":
+        conversation = msg.get("conversation") or []
+        if conversation:
+            last = conversation[-1]
+            role = last.get("role") or "?"
+            content = last.get("content") or ""
+            logger.info("%s 💬 conversation [%d msgs] latest %s: %s",
+                        tag, len(conversation), role.upper(), content[:300])
+        return True
+
+    if msg_type == "status-update":
+        status = msg.get("status") or "(unknown)"
+        logger.info("%s 📞 status -> %s", tag, status)
+        return True
+
+    if msg_type == "speech-update":
+        status = msg.get("status") or "(unknown)"
+        role = msg.get("role") or "?"
+        logger.info("%s 🔊 %s speech %s", tag, role, status)
+        return True
+
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Original wakeup webhook (unchanged behavior)
 # ---------------------------------------------------------------------------
@@ -100,6 +144,10 @@ async def vapi_webhook(request: Request) -> Response:
     msg = body.get("message") or {}
     msg_type = msg.get("type") or "(unknown)"
     vapi_call_id = _vapi_call_id_from_message(body)
+
+    # ---- live transcript / status / speech events ----
+    if _handle_live_transcript(body, "wakeup", vapi_call_id):
+        return Response(status_code=200, content=b"{}")
 
     # ---- end-of-call-report: save transcript + finalize ticket ----
     if msg_type == "end-of-call-report":
@@ -197,14 +245,22 @@ async def vapi_store_webhook(request: Request) -> Response:
     msg_type = msg.get("type") or "(unknown)"
     vapi_call_id = _vapi_call_id_from_message(body)
 
+    # ---- live transcript / status / speech events ----
+    if _handle_live_transcript(body, "store", vapi_call_id):
+        return Response(status_code=200, content=b"{}")
+
     # ---- end-of-call-report: trigger transcript analysis ----
     if msg_type == "end-of-call-report":
         transcript = (msg.get("transcript") or msg.get("artifact", {}).get("transcript") or "").strip()
         ended_reason = msg.get("endedReason") or body.get("endedReason") or "(none)"
-        logger.info("Store call ended: vapi_call_id=%s reason=%s", vapi_call_id, ended_reason)
+        logger.info("Store call ended: vapi_call_id=%s reason=%s transcript_len=%d",
+                     vapi_call_id, ended_reason, len(transcript))
 
-        if vapi_call_id and transcript:
-            asyncio.create_task(_handle_store_transcript(vapi_call_id, transcript))
+        if vapi_call_id:
+            if transcript:
+                asyncio.create_task(_handle_store_transcript(vapi_call_id, transcript, ended_reason))
+            else:
+                asyncio.create_task(_handle_store_no_transcript(vapi_call_id, ended_reason))
 
         return Response(status_code=200, content=b"{}")
 
@@ -247,7 +303,7 @@ async def vapi_store_webhook(request: Request) -> Response:
     return Response(status_code=200, content=b"{}")
 
 
-async def _handle_store_transcript(vapi_call_id: str, transcript: str) -> None:
+async def _handle_store_transcript(vapi_call_id: str, transcript: str, ended_reason: str = "") -> None:
     """Background task: save transcript and run the transcript analyzer LLM."""
     try:
         from app.db.tickets import save_store_call_transcript, get_store_call_by_vapi_id
@@ -262,7 +318,6 @@ async def _handle_store_transcript(vapi_call_id: str, transcript: str) -> None:
         if not sc:
             return
 
-        # Fetch tool calls made during this call
         from app.db.connection import get_connection
         with get_connection() as conn:
             with conn.cursor() as cur:
@@ -275,8 +330,60 @@ async def _handle_store_transcript(vapi_call_id: str, transcript: str) -> None:
             store_call_id=call_id,
             transcript=transcript,
             tool_calls_made=tool_calls_made,
+            ended_reason=ended_reason,
         )
         logger.info("Transcript analysis complete for store_call %s (ticket %s)", call_id, sc["ticket_id"])
 
     except Exception:
         logger.exception("Store transcript handling failed for vapi_call_id=%s", vapi_call_id)
+
+
+async def _handle_store_no_transcript(vapi_call_id: str, ended_reason: str) -> None:
+    """Handle calls that ended without a transcript (no answer, failed, etc.)."""
+    try:
+        from app.db.tickets import (
+            get_store_call_by_vapi_id, update_store_call_status,
+            save_store_call_analysis, count_pending_calls,
+        )
+        from app.services.transcript_analyzer import _compile_final_result
+
+        sc = get_store_call_by_vapi_id(vapi_call_id)
+        if not sc:
+            logger.warning("No store_call found for vapi_call_id=%s (no transcript)", vapi_call_id)
+            return
+
+        failure_reasons = {
+            "customer-busy": "Store was busy / line engaged",
+            "customer-did-not-answer": "Store did not answer the call",
+            "customer-did-not-pick-up": "Store did not pick up",
+            "assistant-error": "Call assistant encountered an error",
+            "phone-call-provider-closed-websocket": "Call dropped by provider",
+            "silence-timed-out": "No response — silence timeout",
+            "voicemail": "Reached voicemail",
+        }
+        note = failure_reasons.get(ended_reason, f"Call ended: {ended_reason}")
+
+        save_store_call_analysis(sc["id"], {
+            "product_available": None,
+            "matched_product": None,
+            "price": None,
+            "delivery_available": None,
+            "delivery_eta": None,
+            "delivery_mode": None,
+            "delivery_charge": None,
+            "product_match_type": "no_data",
+            "notes": note,
+            "data_quality_score": 0.0,
+            "ended_reason": ended_reason,
+            "call_connected": False,
+        })
+
+        logger.info("Store call %s (vapi=%s) ended without transcript: %s",
+                     sc["id"], vapi_call_id, note)
+
+        pending = count_pending_calls(sc["ticket_id"])
+        if pending == 0:
+            await _compile_final_result(sc["ticket_id"])
+
+    except Exception:
+        logger.exception("Failed handling no-transcript call for vapi_call_id=%s", vapi_call_id)
