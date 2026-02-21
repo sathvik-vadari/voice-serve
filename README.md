@@ -2,7 +2,7 @@
 
 Multi-LLM voice commerce service for India — order anything via a phone call.
 
-A user describes what they want, and voice-serve finds nearby stores, **calls them on the phone**, and reports back with availability, pricing, and delivery info. It also doubles as a personal wake-up call scheduler.
+A user describes what they want, and voice-serve finds nearby stores, **calls them on the phone**, and reports back with availability, pricing, and delivery info. It also searches the web for online deals so the user can compare, and doubles as a personal wake-up call scheduler.
 
 ## How It Works
 
@@ -24,31 +24,39 @@ User submits query
 │ Research     │
 └──────┬───────┘
        ▼
-┌──────────────┐
-│ Store Finder │  ← Google Maps: multi-strategy search + dedup
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ Store Ranker │  ← Gemini: re-rank by relevance
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ Store Caller │  ← VAPI: parallel outbound phone calls
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ Transcript   │  ← OpenAI: structured extraction from call transcripts
-│ Analyzer     │
-└──────┬───────┘
-       ▼
-┌──────────────┐
-│ Options      │  ← OpenAI: generate user-facing summary from all
-│ Summary      │     successful calls + structured transcripts
-└──────┬───────┘
-       ▼
-  User picks an option
-        │
-        ▼
+┌──────────────────────────────────────────────┐
+│           runs in parallel                   │
+│                                              │
+│  ┌──────────────┐      ┌──────────────┐     │
+│  │ Store Finder │      │  Web Deals   │     │
+│  │ Google Maps  │      │  Gemini +    │     │
+│  └──────┬───────┘      │  Google      │     │
+│         ▼              │  Search      │     │
+│  ┌──────────────┐      └──────┬───────┘     │
+│  │ Store Ranker │             │             │
+│  │ Gemini       │             │             │
+│  └──────┬───────┘             │             │
+│         ▼                     │             │
+│  ┌──────────────┐             │             │
+│  │ Store Caller │             │             │
+│  │ VAPI calls   │             │             │
+│  └──────┬───────┘             │             │
+│         ▼                     │             │
+│  ┌──────────────┐             │             │
+│  │ Transcript   │             │             │
+│  │ Analyzer     │             │             │
+│  └──────┬───────┘             │             │
+│         │                     │             │
+└─────────┼─────────────────────┼─────────────┘
+          ▼                     ▼
+┌──────────────────────────────────────┐
+│ Options Summary                      │  ← OpenAI: user-facing summary from
+│                                      │     store calls + web deals
+└──────────────┬───────────────────────┘
+               ▼
+         User picks an option
+               │
+               ▼
 ┌──────────────┐
 │  Logistics   │  ← ProRouting: geocode → quote → book → track delivery
 └──────────────┘
@@ -58,50 +66,67 @@ User submits query
 
 | Layer | Tech |
 |-------|------|
-| Framework | FastAPI + Uvicorn |
+| Backend | FastAPI + Uvicorn, Python 3.12+ |
+| Frontend | Next.js 16, React 19, TypeScript 5, Tailwind CSS 4, shadcn/ui |
 | LLMs | OpenAI GPT-4o, Google Gemini 2.0 Flash |
 | Voice / Telephony | VAPI (Deepgram transcription, Cartesia TTS) |
 | Store Discovery | Google Maps Places API |
+| Online Deals | Gemini with Google Search grounding |
 | Logistics | ProRouting (geocoding, quoting, delivery booking & tracking) |
 | Database | PostgreSQL |
-| Language | Python 3.12+ |
 
 ## Project Structure
 
 ```
 app/
-├── main.py                  # FastAPI entry point, lifespan, CORS
+├── main.py                      # FastAPI entry point, lifespan, CORS
 ├── db/
-│   ├── connection.py        # Postgres connection & schema init
-│   ├── tickets.py           # Commerce ticket CRUD
-│   └── wakeup.py            # Wake-up call CRUD
+│   ├── connection.py            # Postgres connection & schema init
+│   ├── tickets.py               # Commerce ticket CRUD
+│   └── wakeup.py                # Wake-up call CRUD
 ├── helpers/
-│   ├── config.py            # Env config loader
-│   ├── logger.py            # Logging setup
-│   ├── prompt_loader.py     # Loads .txt prompt files
-│   └── regional.py          # Per-city language & persona config
-├── prompts/                 # LLM prompt templates (.txt)
+│   ├── config.py                # Env config loader
+│   ├── logger.py                # Logging setup
+│   ├── prompt_loader.py         # Loads .txt prompt files
+│   └── regional.py              # Per-city language & persona config
+├── prompts/                     # LLM prompt templates (.txt)
 ├── routes/
-│   ├── ticket_routes.py     # Ticket REST API endpoints
-│   ├── logistics_routes.py  # ProRouting delivery callbacks
-│   └── vapi_webhook_routes.py  # VAPI event handlers
+│   ├── ticket_routes.py         # Ticket REST API endpoints
+│   ├── logistics_routes.py      # ProRouting delivery callbacks
+│   └── vapi_webhook_routes.py   # VAPI event handlers
 ├── schemas/
-│   ├── tool_handlers.py     # Tool execution logic
-│   └── vapi_tools.py        # VAPI function definitions
+│   ├── tool_handlers.py         # Tool execution logic
+│   └── vapi_tools.py            # VAPI function definitions
 ├── services/
-│   ├── orchestrator.py      # Intent classification
-│   ├── product_research.py  # Product detail extraction
-│   ├── gemini_client.py     # Query analysis & store re-ranking
-│   ├── google_maps.py       # Place search + dedup
-│   ├── store_caller.py      # Outbound call orchestration
-│   ├── transcript_analyzer.py  # Post-call structured extraction
-│   ├── options_summary.py   # User-facing options message generator
-│   ├── logistics.py         # ProRouting delivery booking & tracking
-│   ├── geocoding.py         # Forward/reverse geocoding & pincode extraction
-│   ├── vapi_client.py       # VAPI API wrapper
-│   └── wakeup_scheduler.py  # Background scheduler for wake-up calls
+│   ├── orchestrator.py          # Intent classification
+│   ├── product_research.py      # Product detail extraction
+│   ├── gemini_client.py         # Query analysis & store re-ranking
+│   ├── google_maps.py           # Place search + dedup
+│   ├── store_caller.py          # Outbound call orchestration
+│   ├── transcript_analyzer.py   # Post-call structured extraction
+│   ├── options_summary.py       # User-facing options message generator
+│   ├── web_deals.py             # Online deals via Gemini + Google Search
+│   ├── logistics.py             # ProRouting delivery booking & tracking
+│   ├── geocoding.py             # Forward/reverse geocoding & pincode extraction
+│   ├── vapi_client.py           # VAPI API wrapper
+│   └── wakeup_scheduler.py      # Background scheduler for wake-up calls
 └── scripts/
     └── retry_scheduled_call.py
+
+frontend/
+├── src/
+│   ├── app/
+│   │   ├── page.tsx             # Main page (New Query / Track Order tabs)
+│   │   └── layout.tsx           # Root layout, dark theme
+│   ├── components/
+│   │   ├── query-panel.tsx      # Query form, pipeline progress, options cards
+│   │   ├── tracking-panel.tsx   # Ticket lookup, call details, delivery tracking
+│   │   └── ui/                  # shadcn/ui primitives (Button, Card, Input, …)
+│   └── lib/
+│       ├── api.ts               # Typed API client
+│       └── utils.ts             # Tailwind helpers
+├── package.json
+└── tsconfig.json
 ```
 
 ## API Endpoints
@@ -112,7 +137,7 @@ app/
 |--------|------|-------------|
 | `POST` | `/api/ticket` | Create a ticket — kicks off the full pipeline in the background |
 | `GET`  | `/api/ticket/{ticket_id}` | Poll for status, progress, and results |
-| `GET`  | `/api/ticket/{ticket_id}/options` | Get user-facing summary of all successful call options |
+| `GET`  | `/api/ticket/{ticket_id}/options` | Get user-facing summary of all successful call options + web deals |
 | `POST` | `/api/ticket/{ticket_id}/confirm` | Confirm an option — triggers delivery booking via ProRouting |
 | `GET`  | `/api/ticket/{ticket_id}/delivery` | Get logistics/delivery status & tracking info |
 
@@ -122,7 +147,8 @@ app/
 {
   "query": "I need a 2kg Prestige pressure cooker",
   "location": "Indiranagar, Bangalore",
-  "user_phone": "+919876543210"
+  "user_phone": "+919876543210",
+  "user_name": "Priya"
 }
 ```
 
@@ -143,6 +169,18 @@ app/
       "delivery_eta": "same day",
       "delivery_charge": 0,
       "notes": "Only 3 left in stock"
+    }
+  ],
+  "web_deals": [
+    {
+      "platform": "Amazon",
+      "product_title": "Prestige Svachh 2L Pressure Cooker",
+      "price": 1399.0,
+      "original_price": 1895.0,
+      "discount_percent": 26,
+      "url": "https://amazon.in/...",
+      "delivery_estimate": "2-3 days",
+      "in_stock": true
     }
   ],
   "message": "Hey! We called 4 stores for you...",
@@ -175,6 +213,7 @@ app/
 ### Prerequisites
 
 - Python 3.12+
+- Node.js 18+ (for the frontend)
 - PostgreSQL
 - A [VAPI](https://vapi.ai) account with a phone number
 - API keys for OpenAI, Google Gemini, and Google Maps
@@ -183,11 +222,20 @@ app/
 
 ### Install
 
+**Backend:**
+
 ```bash
 git clone https://github.com/<you>/voice-serve.git
 cd voice-serve
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
+```
+
+**Frontend:**
+
+```bash
+cd frontend
+npm install
 ```
 
 ### Configure
@@ -200,7 +248,16 @@ cp .env.example .env
 
 You'll need API keys for OpenAI, Google Maps, Google Gemini, VAPI, and ProRouting. See [`.env.example`](.env.example) for all available options.
 
+For the frontend, set the API URL if the backend isn't on `localhost:8000`:
+
+```bash
+# frontend/.env.local
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
 ### Run
+
+**Backend:**
 
 ```bash
 python -m app.main
@@ -208,9 +265,18 @@ python -m app.main
 
 The server starts on `http://0.0.0.0:8000` by default. The database schema is auto-created on first boot.
 
+**Frontend:**
+
+```bash
+cd frontend
+npm run dev
+```
+
+Opens on `http://localhost:3000`.
+
 ## Database Schema
 
-Nine tables, auto-migrated on startup:
+Ten tables, auto-migrated on startup:
 
 | Table | Purpose |
 |-------|---------|
@@ -218,6 +284,7 @@ Nine tables, auto-migrated on startup:
 | `ticket_products` | Extracted product details & specs (JSONB) |
 | `ticket_stores` | Discovered stores with location & call priority |
 | `store_calls` | Per-store call records: transcript (text + structured JSON), analysis, pricing |
+| `web_deals` | Online deal results from Gemini-powered web search |
 | `logistics_orders` | Delivery orders: pickup/drop addresses, LSP selection, rider tracking |
 | `wakeup_users` | User preferences (daily wake-up time, do-not-call) |
 | `scheduled_calls` | Pending/completed wake-up calls |
