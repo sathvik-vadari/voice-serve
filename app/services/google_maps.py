@@ -1,5 +1,6 @@
 """Google Maps Places API – multi-strategy store discovery with deduplication."""
 import logging
+import math
 import time
 from typing import Any
 
@@ -7,11 +8,50 @@ import aiohttp
 
 from app.helpers.config import Config
 from app.db.tickets import save_stores, log_tool_call
+from app.services.geocoding import geocode_address
 
 logger = logging.getLogger(__name__)
 
 TEXT_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 PLACE_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+
+
+def _has_location_overlap(query: str, location: str) -> bool:
+    """Check if any significant part of the location already appears in the query."""
+    location_parts = [p.strip().lower() for p in location.split(",")]
+    query_low = query.lower()
+    for part in location_parts:
+        if len(part) >= 3 and part in query_low:
+            return True
+    return False
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance between two points in km."""
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+         * math.sin(dlon / 2) ** 2)
+    return R * 2 * math.asin(math.sqrt(a))
+
+
+def _extract_city_area(location: str) -> str:
+    """Extract neighborhood + city from a full address for cleaner search queries.
+
+    '1st Floor, faffHQ, HSR Layout, Bangalore' → 'HSR Layout, Bangalore'
+    """
+    parts = [p.strip() for p in location.split(",")]
+    skip_keywords = ["floor", "flat", "door", "shop", "no.", "no ", "building", "#"]
+    meaningful = [
+        p for p in parts
+        if len(p.strip()) >= 3
+        and not any(kw in p.lower() for kw in skip_keywords)
+    ]
+    if len(meaningful) >= 2:
+        return ", ".join(meaningful[-2:])
+    return meaningful[-1] if meaningful else location
 
 
 async def find_stores(
@@ -20,6 +60,7 @@ async def find_stores(
     location: str,
     max_stores: int | None = None,
     search_queries: list[str] | None = None,
+    specific_store_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Search Google Maps using multiple strategies and merge results.
@@ -27,6 +68,10 @@ async def find_stores(
     If search_queries is provided, each query is tried in order and results
     are merged with deduplication by place_id.  Results from earlier queries
     (higher priority) are ranked above later ones.
+
+    When specific_store_name is set, a bare store-name search (no location)
+    is prepended as the highest-priority query so the exact store is found
+    even if it's outside the immediate area.
 
     Falls back to a single search using store_search_query if search_queries
     is not given.
@@ -36,15 +81,39 @@ async def find_stores(
     if not api_key:
         raise ValueError("GOOGLE_MAPS_API_KEY is not set")
 
+    city_area = _extract_city_area(location)
+
+    # Geocode user location for proximity bias and distance sorting
+    user_lat: float | None = None
+    user_lng: float | None = None
+    try:
+        user_geo = await geocode_address(location)
+        if user_geo:
+            user_lat = user_geo.get("lat")
+            user_lng = user_geo.get("lng")
+            logger.info("Ticket %s: user location geocoded to (%s, %s)", ticket_id, user_lat, user_lng)
+    except Exception:
+        logger.warning("Ticket %s: failed to geocode user location, skipping proximity bias", ticket_id)
+
     queries = search_queries or [f"{store_search_query} near {location}"]
+
+    if specific_store_name:
+        bare = specific_store_name.strip()
+        city_query = f"{bare} {city_area}"
+        prepend = []
+        if bare.lower() not in [q.lower().strip() for q in queries]:
+            prepend.append(bare)
+        if city_query.lower() not in [q.lower().strip() for q in queries]:
+            prepend.append(city_query)
+        queries = prepend + queries
+
     queries_with_location = []
     for q in queries:
         low = q.lower()
-        loc_low = location.lower()
-        if loc_low not in low and "near" not in low:
-            queries_with_location.append(f"{q} near {location}")
-        else:
+        if _has_location_overlap(q, location) or "near" in low:
             queries_with_location.append(q)
+        else:
+            queries_with_location.append(f"{q} near {city_area}")
 
     seen_place_ids: set[str] = set()
     all_places: list[tuple[int, dict]] = []
@@ -52,7 +121,11 @@ async def find_stores(
     async with aiohttp.ClientSession() as session:
         for priority, search_text in enumerate(queries_with_location):
             start = time.time()
-            params = {"query": search_text, "key": api_key}
+            params: dict[str, Any] = {"query": search_text, "key": api_key}
+
+            if user_lat and user_lng:
+                params["location"] = f"{user_lat},{user_lng}"
+                params["radius"] = "50000"
 
             async with session.get(TEXT_SEARCH_URL, params=params) as resp:
                 data = await resp.json()
@@ -122,6 +195,12 @@ async def find_stores(
             geo = detail.get("geometry", {}).get("location", {})
             hours = detail.get("opening_hours", {})
 
+            store_lat = geo.get("lat")
+            store_lng = geo.get("lng")
+            distance_km: float | None = None
+            if user_lat and user_lng and store_lat and store_lng:
+                distance_km = round(_haversine_km(user_lat, user_lng, store_lat, store_lng), 2)
+
             store = {
                 "name": detail.get("name") or place.get("name", "Unknown"),
                 "address": detail.get("formatted_address") or place.get("formatted_address"),
@@ -129,25 +208,47 @@ async def find_stores(
                 "rating": detail.get("rating") or place.get("rating"),
                 "total_ratings": detail.get("user_ratings_total") or place.get("user_ratings_total"),
                 "place_id": place_id,
-                "latitude": geo.get("lat"),
-                "longitude": geo.get("lng"),
+                "latitude": store_lat,
+                "longitude": store_lng,
                 "is_open_now": hours.get("open_now"),
                 "business_status": detail.get("business_status"),
                 "place_types": detail.get("types", []),
+                "distance_km": distance_km,
             }
             stores.append(store)
 
             log_tool_call(
                 ticket_id, "google_maps_place_details",
                 {"place_id": place_id},
-                {"name": store["name"], "phone": phone, "open_now": store["is_open_now"]},
+                {"name": store["name"], "phone": phone, "open_now": store["is_open_now"],
+                 "distance_km": distance_km},
                 latency_ms=int((time.time() - detail_start) * 1000),
             )
 
             if len([s for s in stores if s.get("phone_number")]) >= max_stores:
                 break
 
-    callable_stores = [s for s in stores if s.get("phone_number")]
+    callable_stores = [
+        s for s in stores
+        if s.get("phone_number") and s.get("is_open_now") is not False
+    ]
+    closed_count = sum(
+        1 for s in stores
+        if s.get("phone_number") and s.get("is_open_now") is False
+    )
+    if closed_count:
+        logger.info(
+            "Ticket %s: skipped %d store(s) that Google Maps reports as currently closed",
+            ticket_id, closed_count,
+        )
+
+    if specific_store_name and callable_stores:
+        callable_stores.sort(key=lambda s: s.get("distance_km") or 9999)
+        logger.info(
+            "Ticket %s: sorted %d stores by distance for specific store '%s'",
+            ticket_id, len(callable_stores), specific_store_name,
+        )
+
     if not callable_stores:
         logger.warning("No stores found with phone numbers for ticket %s", ticket_id)
 

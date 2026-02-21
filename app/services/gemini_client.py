@@ -88,12 +88,25 @@ async def rerank_stores(
             "address": s.get("address"),
             "rating": s.get("rating"),
             "total_ratings": s.get("total_ratings"),
+            "distance_km": s.get("distance_km"),
         }
         for i, s in enumerate(stores)
     ], indent=2)
 
     specific_store = query_analysis.get("specific_store_name") or ""
     product_cat = query_analysis.get("product_category") or ""
+    is_specific = query_analysis.get("is_specific_store", False)
+
+    if is_specific:
+        ranking_criteria = (
+            "Highest priority: exact or close name match to the requested store. "
+            "Among matching stores, prefer the NEAREST one (lowest distance_km). "
+            "Non-matching stores go last, ranked by category relevance then rating."
+        )
+    else:
+        ranking_criteria = (
+            "Rank by: category relevance, then rating, then proximity (lower distance_km is better)."
+        )
 
     prompt = f"""User query: "{query}"
 Specific store requested: "{specific_store}"
@@ -102,7 +115,7 @@ Product category: "{product_cat}"
 Stores found:
 {stores_summary}
 
-Re-rank by relevance. Highest priority: exact or close name match to the requested store. Then: category relevance, rating.
+Re-rank by relevance. {ranking_criteria}
 
 Respond JSON only:
 {{"ranked_indices": [0, 2, 1], "reasoning": "brief explanation"}}"""

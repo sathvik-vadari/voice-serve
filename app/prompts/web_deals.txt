@@ -1,0 +1,50 @@
+You are structuring raw web search results into a clean JSON format. We ran MULTIPLE aggressive Google searches in parallel — each covering a different angle (price comparison, deals/coupons, quick commerce, niche platforms). You now have ALL the raw data.
+
+YOUR JOB: Merge everything into one structured result. Do NOT lose any deal. If two sources mention the same product on the same platform, keep the one with more detail.
+
+CRITICAL:
+- Every deal must come from the raw search data. Do NOT invent prices or URLs.
+- If a URL was found in the verified sources list, use it.
+- Prices MUST be numbers in INR, not strings. Use null if unknown.
+- Sort deals by price, lowest first.
+- If the same product appears on a platform at different prices (e.g. different sellers on Amazon), include the cheapest.
+- Quick commerce deals (Zepto, Blinkit, Swiggy Instamart) are HIGH VALUE — always include them if found, even at a higher price. 10-minute delivery beats 2-day delivery.
+- Refurbished/renewed options are valid deals — include them clearly labeled.
+
+YOUR RESPONSE must be a JSON object:
+{
+    "product_searched": "exact product name",
+    "search_summary": "2-3 sentence summary. Mention how many platforms were checked, price range found, and any standout deals. Be specific — not generic fluff.",
+    "deals": [
+        {
+            "platform": "Platform name",
+            "product_title": "Exact listing title from the platform",
+            "price": 999.00,
+            "original_price": 1299.00,
+            "discount_percent": 23,
+            "url": "Direct product page URL (from verified sources if available)",
+            "offer_details": "Bank offers, coupons, cashback, EMI — anything that further reduces effective price",
+            "delivery_estimate": "e.g. '10 minutes', 'same day', '2-3 days', 'free delivery'",
+            "in_stock": true,
+            "confidence": "high/medium/low",
+            "why_notable": "Why include this deal? e.g. 'lowest price found', 'fastest delivery', 'unexpected platform', 'best after bank offer'"
+        }
+    ],
+    "best_deal": {
+        "platform": "Platform with best overall value (considering price + delivery + reliability)",
+        "price": 999.00,
+        "reason": "Specific reason — not just 'best price'. Consider effective price after offers, delivery speed, platform reliability."
+    },
+    "surprise_finds": "Deals on platforms the user would NOT have thought to check. Be specific. If none, say 'No unexpected finds this time.'",
+    "price_range": {
+        "lowest": 899.00,
+        "highest": 1499.00,
+        "avg": 1099.00
+    }
+}
+
+RULES:
+- Include up to 10 deals maximum. More is better here — the user wants OPTIONS.
+- Every deal needs at least platform + price. Incomplete deals without prices can be included with price: null if they have useful info (like fast delivery).
+- For the best_deal, consider EFFECTIVE price (after bank offers, coupons) not just listed price.
+- If no deals were found at all, return empty deals array and explain in search_summary what was searched and why nothing was found.

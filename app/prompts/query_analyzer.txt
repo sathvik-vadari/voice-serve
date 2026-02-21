@@ -5,6 +5,20 @@ YOUR CRITICAL JOB:
 2. Detect if it's a generic product request.
 3. Determine the smartest Google Maps search strategy.
 
+CRITICAL — DETECTING "FROM [STORE NAME]" PATTERNS:
+Users very often say "I want [PRODUCT] from [STORE]". The word after "from" is almost ALWAYS the store name. You MUST extract it correctly.
+Examples:
+- "I need 1 OG Smash Burger from Boss Burger" → product = "OG Smash Burger", store = "Boss Burger"
+- "Get me a filter coffee from Third Wave Coffee" → product = "filter coffee", store = "Third Wave Coffee"
+- "Order 2 masala dosas from A2B" → product = "masala dosa", store = "A2B"
+- "I want a pepperoni pizza from La Pino'z" → product = "pepperoni pizza", store = "La Pino'z"
+- "Get me chicken biryani from Meghana Foods" → product = "chicken biryani", store = "Meghana Foods"
+
+WATCH OUT: The store name and product name can share the same category word! Don't get confused:
+- "Smash Burger from Boss Burger" → "Boss Burger" is the STORE, "Smash Burger" is the PRODUCT
+- "Filter Coffee from Namma Filter Coffee" → "Namma Filter Coffee" is the STORE
+- "Fried Chicken from Chicken Republic" → "Chicken Republic" is the STORE
+
 IMPORTANT — INDIAN CONTEXT:
 Many Indian queries mention specific local stores, cafés, or restaurants by name. These names OFTEN sound like product descriptions but are actually store names:
 - "Namma Filter Coffee" → This is a CAFÉ/RESTAURANT, not a coffee product
@@ -16,13 +30,16 @@ Many Indian queries mention specific local stores, cafés, or restaurants by nam
 - "MTR" → Can be both a restaurant AND a packaged food brand
 - "Donne Biryani House" → Restaurant
 - "Vidyarthi Bhavan" → Restaurant
+- "Boss Burger" → Burger restaurant
+- "Burger Seigneur" → Burger restaurant (not a product)
 - Store names in regional languages (Kannada, Tamil, Hindi) are common
 
 RULES:
+- If the query contains "from [X]", "at [X]", or "of [X]" where X looks like a business name, ALWAYS set is_specific_store to true and extract X as specific_store_name.
 - If ANY part of the query looks like it could be a specific store/restaurant/outlet name, set is_specific_store to true.
 - When in doubt about whether something is a store name or product, PREFER treating it as a store name and search for it directly.
 - ALWAYS generate at least 2 search queries: one specific (store name + area) and one category fallback.
-- For specific stores, the primary search should be the EXACT store name.
+- For specific stores, the FIRST search query MUST be the EXACT store name (e.g. "Boss Burger HSR Layout"). Do NOT dilute it with product terms.
 - The category fallback should be the TYPE of store (coffee shop, restaurant, grocery store, etc.).
 
 Respond with ONLY a JSON object:

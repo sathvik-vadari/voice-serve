@@ -13,6 +13,7 @@ from app.db.tickets import (
     get_ticket,
     get_product,
     get_store_calls_for_ticket,
+    get_web_deals,
     log_llm_call,
 )
 
@@ -128,6 +129,11 @@ async def generate_options_summary(ticket_id: str) -> dict[str, Any]:
     product_name = product["product_name"] if product else ticket.get("query", "unknown")
     customer_specs = product.get("specs") or {} if product else {}
 
+    web_deals = get_web_deals(ticket_id)
+    web_deals_list = []
+    if web_deals and web_deals.get("deals"):
+        web_deals_list = web_deals["deals"]
+
     result: dict[str, Any] = {
         "ticket_id": ticket_id,
         "product_requested": product_name,
@@ -137,9 +143,13 @@ async def generate_options_summary(ticket_id: str) -> dict[str, Any]:
         "calls_connected": connected,
         "options_found": len(options),
         "options": options,
+        "web_deals": web_deals_list,
+        "web_deals_summary": web_deals.get("search_summary") if web_deals else None,
+        "web_deals_best": web_deals.get("best_deal") if web_deals else None,
+        "web_deals_surprise": web_deals.get("surprise_finds") if web_deals else None,
     }
 
-    if not options:
+    if not options and not web_deals_list:
         result["message"] = (
             f"We called {total_calls} stores for '{product_name}' but unfortunately "
             f"none of them had it available right now. "
@@ -148,7 +158,18 @@ async def generate_options_summary(ticket_id: str) -> dict[str, Any]:
         result["quick_verdict"] = "No stores had the product available."
         return result
 
-    message_data = await _generate_message(ticket_id, product_name, customer_specs, options, total_calls, connected)
+    if not options and web_deals_list:
+        result["message"] = (
+            f"We called {total_calls} stores for '{product_name}' but none had it in stock. "
+            f"However, we found {len(web_deals_list)} online deal(s) for you!"
+        )
+        result["quick_verdict"] = "No local stores, but online deals found!"
+        return result
+
+    message_data = await _generate_message(
+        ticket_id, product_name, customer_specs, options,
+        total_calls, connected, web_deals_list,
+    )
     result["message"] = message_data.get("message", "")
     result["quick_verdict"] = message_data.get("quick_verdict", "")
 
@@ -166,6 +187,7 @@ async def _generate_message(
     options: list[dict],
     total_calls: int,
     connected: int,
+    web_deals: list[dict] | None = None,
 ) -> dict[str, str]:
     """Call the LLM to produce a user-friendly options message."""
     loader = PromptLoader()
@@ -210,6 +232,31 @@ async def _generate_message(
         parts.append(f"  Transcript:\n{_format_transcript(opt)}")
         options_text.append(f"--- Option {idx} ---\n" + "\n".join(parts))
 
+    web_deals_text = ""
+    if web_deals:
+        deal_lines = []
+        for idx, deal in enumerate(web_deals, 1):
+            parts = [f"  Platform: {deal.get('platform', 'Unknown')}"]
+            if deal.get("product_title"):
+                parts.append(f"  Product: {deal['product_title']}")
+            if deal.get("price") is not None:
+                parts.append(f"  Price: ₹{deal['price']}")
+            if deal.get("original_price") is not None:
+                parts.append(f"  Original: ₹{deal['original_price']} ({deal.get('discount_percent', '?')}% off)")
+            if deal.get("url"):
+                parts.append(f"  URL: {deal['url']}")
+            if deal.get("delivery_estimate"):
+                parts.append(f"  Delivery: {deal['delivery_estimate']}")
+            if deal.get("offer_details"):
+                parts.append(f"  Offers: {deal['offer_details']}")
+            if deal.get("why_notable"):
+                parts.append(f"  Notable: {deal['why_notable']}")
+            deal_lines.append(f"--- Online Deal {idx} ---\n" + "\n".join(parts))
+        web_deals_text = (
+            f"\n\nONLINE DEALS FOUND: {len(web_deals)}\n"
+            + "\n\n".join(deal_lines)
+        )
+
     ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     current_datetime = ist_now.strftime("%A, %d %B %Y, %I:%M %p IST")
 
@@ -221,6 +268,7 @@ async def _generate_message(
         f"CALLS CONNECTED: {connected}\n"
         f"OPTIONS WITH PRODUCT AVAILABLE: {len(options)}\n\n"
         + "\n\n".join(options_text)
+        + web_deals_text
     )
 
     client = _get_client()

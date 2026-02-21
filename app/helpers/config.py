@@ -55,6 +55,13 @@ class Config:
     MAX_STORES_TO_CALL: int = int(os.getenv("MAX_STORES_TO_CALL", "5"))
     MAX_ALTERNATIVES: int = int(os.getenv("MAX_ALTERNATIVES", "3"))
 
+    # Store call retry (vendor doesn't pick up)
+    STORE_CALL_MAX_RETRIES: int = int(os.getenv("STORE_CALL_MAX_RETRIES", "1"))
+    STORE_CALL_RETRY_DELAY_SECONDS: int = int(os.getenv("STORE_CALL_RETRY_DELAY_SECONDS", "120"))
+
+    # Delivery retry (LSP cancels)
+    MAX_DELIVERY_RETRIES: int = int(os.getenv("MAX_DELIVERY_RETRIES", "3"))
+
     # ProRouting Logistics
     PROROUTING_API_KEY: Optional[str] = os.getenv("PROROUTING_API_KEY")
     PROROUTING_BASE_URL: str = os.getenv("PROROUTING_BASE_URL", "https://preprod-app.prorouting.in")

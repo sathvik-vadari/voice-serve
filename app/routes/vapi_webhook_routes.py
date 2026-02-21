@@ -347,18 +347,45 @@ async def _handle_store_transcript(
         logger.exception("Store transcript handling failed for vapi_call_id=%s", vapi_call_id)
 
 
+_RETRYABLE_ENDED_REASONS = frozenset({
+    "customer-busy",
+    "customer-did-not-answer",
+    "customer-did-not-pick-up",
+})
+
+
 async def _handle_store_no_transcript(vapi_call_id: str, ended_reason: str) -> None:
-    """Handle calls that ended without a transcript (no answer, failed, etc.)."""
+    """Handle calls that ended without a transcript (no answer, failed, etc.).
+
+    If the vendor simply didn't pick up and we haven't exhausted retries,
+    schedule a callback after STORE_CALL_RETRY_DELAY_SECONDS (default 2 min).
+    """
     try:
         from app.db.tickets import (
             get_store_call_by_vapi_id, update_store_call_status,
             save_store_call_analysis, count_pending_calls,
+            get_store_call_retry_count,
         )
         from app.services.transcript_analyzer import _compile_final_result
 
         sc = get_store_call_by_vapi_id(vapi_call_id)
         if not sc:
             logger.warning("No store_call found for vapi_call_id=%s (no transcript)", vapi_call_id)
+            return
+
+        retry_count = get_store_call_retry_count(sc["id"])
+        max_retries = Config.STORE_CALL_MAX_RETRIES
+
+        if ended_reason in _RETRYABLE_ENDED_REASONS and retry_count < max_retries:
+            attempt = retry_count + 1
+            delay = Config.STORE_CALL_RETRY_DELAY_SECONDS
+            logger.info(
+                "Store call %s (vapi=%s) vendor didn't answer (%s). "
+                "Scheduling retry %d/%d in %ds",
+                sc["id"], vapi_call_id, ended_reason, attempt, max_retries, delay,
+            )
+            update_store_call_status(sc["id"], "retry_scheduled")
+            asyncio.create_task(_retry_store_call(sc, delay))
             return
 
         failure_reasons = {
@@ -371,6 +398,8 @@ async def _handle_store_no_transcript(vapi_call_id: str, ended_reason: str) -> N
             "voicemail": "Reached voicemail",
         }
         note = failure_reasons.get(ended_reason, f"Call ended: {ended_reason}")
+        if ended_reason in _RETRYABLE_ENDED_REASONS and retry_count >= max_retries:
+            note += f" (after {retry_count + 1} attempts)"
 
         save_store_call_analysis(sc["id"], {
             "product_available": None,
@@ -396,3 +425,92 @@ async def _handle_store_no_transcript(vapi_call_id: str, ended_reason: str) -> N
 
     except Exception:
         logger.exception("Failed handling no-transcript call for vapi_call_id=%s", vapi_call_id)
+
+
+async def _retry_store_call(sc: dict, delay_seconds: int) -> None:
+    """Wait `delay_seconds` then re-initiate the VAPI call to the same store."""
+    try:
+        await asyncio.sleep(delay_seconds)
+
+        from app.db.tickets import (
+            get_store_by_id, get_product, get_ticket,
+            reset_store_call_for_retry, update_store_call_status,
+            get_store_call_retry_count, log_tool_call,
+        )
+        from app.services.store_caller import _build_store_prompt
+        from app.services.vapi_client import create_store_phone_call
+        from app.helpers.regional import detect_region
+
+        store = get_store_by_id(sc["store_id"])
+        if not store:
+            logger.error("Retry aborted: store %s not found", sc["store_id"])
+            update_store_call_status(sc["id"], "failed")
+            return
+
+        ticket = get_ticket(sc["ticket_id"])
+        if not ticket:
+            logger.error("Retry aborted: ticket %s not found", sc["ticket_id"])
+            update_store_call_status(sc["id"], "failed")
+            return
+
+        product = get_product(sc["ticket_id"])
+        if not product:
+            logger.error("Retry aborted: no product for ticket %s", sc["ticket_id"])
+            update_store_call_status(sc["id"], "failed")
+            return
+
+        phone = store.get("phone_number")
+        if not phone:
+            logger.error("Retry aborted: no phone for store %s", store.get("store_name"))
+            update_store_call_status(sc["id"], "failed")
+            return
+
+        location = ticket.get("location", "")
+        retry_num = get_store_call_retry_count(sc["id"]) + 1
+
+        prompt, region, first_message = _build_store_prompt(
+            product, location, store["store_name"],
+        )
+
+        logger.info(
+            "Retrying store call %s (attempt %d) to %s (%s)",
+            sc["id"], retry_num + 1, store["store_name"], phone,
+        )
+
+        vapi_result = await create_store_phone_call(
+            customer_number=phone,
+            system_prompt=prompt,
+            ticket_id=sc["ticket_id"],
+            store_call_id=sc["id"],
+            region=region,
+            first_message=first_message,
+        )
+
+        if vapi_result.get("success"):
+            new_vapi_call_id = vapi_result.get("call", {}).get("id")
+            if new_vapi_call_id:
+                reset_store_call_for_retry(sc["id"], new_vapi_call_id)
+                logger.info(
+                    "Store call %s retry successful, new vapi_call_id=%s",
+                    sc["id"], new_vapi_call_id,
+                )
+            else:
+                update_store_call_status(sc["id"], "failed")
+        else:
+            logger.error(
+                "Store call %s retry VAPI call failed: %s",
+                sc["id"], vapi_result.get("error"),
+            )
+            update_store_call_status(sc["id"], "failed")
+
+        log_tool_call(
+            sc["ticket_id"], "vapi_retry_store_call",
+            {"store": store["store_name"], "phone": phone, "retry_attempt": retry_num},
+            vapi_result,
+            status="success" if vapi_result.get("success") else "error",
+            error_message=vapi_result.get("error"),
+            store_call_id=sc["id"],
+        )
+
+    except Exception:
+        logger.exception("Retry failed for store_call %s", sc.get("id"))

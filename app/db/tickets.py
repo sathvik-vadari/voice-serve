@@ -45,7 +45,8 @@ def ticket_exists_and_active(ticket_id: str) -> bool:
         return False
     active_statuses = (
         "received", "classifying", "analyzing", "researching",
-        "finding_stores", "calling_stores", "wakeup_calling", "wakeup_in_progress",
+        "finding_stores", "calling_stores",
+        "wakeup_calling", "wakeup_in_progress",
         "placing_order", "order_placed", "agent_assigned", "out_for_delivery",
     )
     return row[0] in active_statuses
@@ -467,6 +468,38 @@ def get_store_by_id(store_id: int) -> Optional[dict[str, Any]]:
     }
 
 
+def get_store_call_retry_count(call_id: int) -> int:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT retry_count FROM store_calls WHERE id = %s", (call_id,))
+            row = cur.fetchone()
+    return row[0] if row else 0
+
+
+def reset_store_call_for_retry(call_id: int, new_vapi_call_id: str) -> None:
+    """Increment retry_count, set new vapi_call_id, and reset status to 'calling' for a retry attempt."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE store_calls
+                   SET retry_count = retry_count + 1,
+                       vapi_call_id = %s,
+                       status = 'calling',
+                       transcript = NULL,
+                       transcript_json = NULL,
+                       call_analysis = NULL,
+                       product_available = NULL,
+                       matched_product = NULL,
+                       price = NULL,
+                       product_match_type = NULL,
+                       notes = NULL,
+                       tool_calls_raw = NULL,
+                       updated_at = NOW()
+                   WHERE id = %s""",
+                (new_vapi_call_id, call_id),
+            )
+
+
 def count_pending_calls(ticket_id: str) -> int:
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -476,6 +509,67 @@ def count_pending_calls(ticket_id: str) -> int:
                 (ticket_id,),
             )
             return cur.fetchone()[0]
+
+
+# ---------------------------------------------------------------------------
+# Web deals
+# ---------------------------------------------------------------------------
+
+def save_web_deals(ticket_id: str, result: dict[str, Any]) -> int:
+    deals = result.get("deals") or []
+    best_deal = result.get("best_deal")
+    price_range = result.get("price_range")
+    grounding = result.get("_grounding_metadata")
+    status = "error" if result.get("error") else "completed"
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO web_deals
+                       (ticket_id, product_searched, search_summary, deals, best_deal,
+                        surprise_finds, price_range, grounding_metadata, status, error_message)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (
+                    ticket_id,
+                    result.get("product_searched"),
+                    result.get("search_summary"),
+                    json.dumps(deals, default=str),
+                    json.dumps(best_deal, default=str) if best_deal else None,
+                    result.get("surprise_finds"),
+                    json.dumps(price_range, default=str) if price_range else None,
+                    json.dumps(grounding, default=str) if grounding else None,
+                    status,
+                    result.get("error"),
+                ),
+            )
+            return cur.fetchone()[0]
+
+
+def get_web_deals(ticket_id: str) -> Optional[dict[str, Any]]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, product_searched, search_summary, deals, best_deal,
+                          surprise_finds, price_range, grounding_metadata, status,
+                          error_message, created_at
+                   FROM web_deals WHERE ticket_id = %s ORDER BY id DESC LIMIT 1""",
+                (ticket_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "product_searched": row[1],
+        "search_summary": row[2],
+        "deals": row[3] if row[3] else [],
+        "best_deal": row[4],
+        "surprise_finds": row[5],
+        "price_range": row[6],
+        "grounding_metadata": row[7],
+        "status": row[8],
+        "error_message": row[9],
+        "created_at": row[10].isoformat() if row[10] else None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -688,6 +782,19 @@ def get_logistics_order(ticket_id: str) -> Optional[dict[str, Any]]:
         "created_at": row[28].isoformat() if row[28] else None,
         "updated_at": row[29].isoformat() if row[29] else None,
     }
+
+
+def get_failed_lsp_ids(ticket_id: str) -> list[str]:
+    """Get LSP IDs from all cancelled logistics orders for this ticket."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT selected_lsp_id FROM logistics_orders
+                   WHERE ticket_id = %s AND order_state = 'Cancelled'
+                   AND selected_lsp_id IS NOT NULL""",
+                (ticket_id,),
+            )
+            return [row[0] for row in cur.fetchall()]
 
 
 def get_logistics_order_by_prorouting_id(prorouting_order_id: str) -> Optional[dict[str, Any]]:

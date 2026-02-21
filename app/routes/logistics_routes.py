@@ -1,4 +1,5 @@
 """ProRouting logistics callback webhook + status polling."""
+import asyncio
 import logging
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.db.tickets import (
     append_logistics_callback,
     get_logistics_order_by_prorouting_id,
 )
+from app.services.logistics import retry_delivery
 
 logger = setup_logger(__name__)
 
@@ -32,12 +34,24 @@ PROROUTING_TO_TICKET_STATUS = {
 }
 
 
+def _is_lsp_cancellation(body: dict[str, Any]) -> bool:
+    """Check if the cancellation was initiated by the LSP (not the buyer/merchant)."""
+    order = body.get("order", {})
+    cancellation = order.get("cancellation", {})
+    cancelled_by = cancellation.get("cancelled_by", "")
+    lsp_id = order.get("lsp", {}).get("id", "")
+    return bool(cancelled_by and lsp_id and cancelled_by == lsp_id)
+
+
 @router.post("/api/logistics/callback")
 async def logistics_callback(request: Request):
     """
     Webhook endpoint for ProRouting status callbacks.
     ProRouting hits this URL whenever the delivery order state changes
     (agent assigned, picked up, delivered, cancelled, etc.).
+
+    On LSP-initiated cancellations, automatically retries with the next
+    available delivery partner.
     """
     try:
         body: dict[str, Any] = await request.json()
@@ -58,9 +72,10 @@ async def logistics_callback(request: Request):
         or body.get("order_state")
     )
 
-    rider_name = body.get("agent", {}).get("name") if body.get("agent") else None
-    rider_phone = body.get("agent", {}).get("phone") if body.get("agent") else None
-    tracking_url = body.get("tracking_url") or body.get("tracking", {}).get("url") if body.get("tracking") else None
+    rider_info = body.get("order", {}).get("rider", {}) or body.get("agent", {}) or {}
+    rider_name = rider_info.get("name") or None
+    rider_phone = rider_info.get("phone") or None
+    tracking_url = body.get("order", {}).get("tracking_url") or body.get("tracking_url")
 
     append_logistics_callback(order_id, body)
 
@@ -74,12 +89,20 @@ async def logistics_callback(request: Request):
         )
 
         if ticket_id:
-            ticket_status = PROROUTING_TO_TICKET_STATUS.get(order_state)
-            if ticket_status:
-                update_ticket_status(ticket_id, ticket_status)
+            if order_state == "Cancelled" and _is_lsp_cancellation(body):
+                cancellation = body.get("order", {}).get("cancellation", {})
                 logger.info(
-                    "Ticket %s: delivery state → %s (ticket status → %s)",
-                    ticket_id, order_state, ticket_status,
+                    "Ticket %s: LSP cancelled (reason: %s) — triggering auto-retry",
+                    ticket_id, cancellation.get("reason_desc", "unknown"),
                 )
+                asyncio.create_task(retry_delivery(ticket_id))
+            else:
+                ticket_status = PROROUTING_TO_TICKET_STATUS.get(order_state)
+                if ticket_status:
+                    update_ticket_status(ticket_id, ticket_status)
+                    logger.info(
+                        "Ticket %s: delivery state → %s (ticket status → %s)",
+                        ticket_id, order_state, ticket_status,
+                    )
 
     return {"status": "ok"}

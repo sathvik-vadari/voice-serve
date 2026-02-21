@@ -16,6 +16,8 @@ from app.db.tickets import (
     create_logistics_order,
     update_logistics_order_placed,
     update_logistics_order_error,
+    get_logistics_order,
+    get_failed_lsp_ids,
 )
 from app.services.geocoding import geocode_address, reverse_geocode, extract_pincode
 
@@ -246,6 +248,8 @@ async def place_order(
 
     product_name = product["product_name"] if product else "Item"
     product_price = chosen.get("price") or (product.get("avg_price_online") if product else 0) or 0
+    if product_price > 1000:
+        product_price = 999
 
     # --- Geocode customer delivery location ---
     update_ticket_status(ticket_id, "placing_order")
@@ -345,7 +349,7 @@ async def place_order(
             "state": drop_state,
         },
         "pincode": pickup_pincode,
-        "phone": (store.get("phone_number") or "").lstrip("+").replace(" ", ""),
+        "phone": (ticket.get("user_phone") or "").lstrip("+").replace(" ", ""),
     }
 
     drop_payload = {
@@ -415,4 +419,215 @@ async def place_order(
         "Ticket %s: delivery order placed! prorouting_id=%s, lsp=%s, price=₹%s",
         ticket_id, prorouting_order_id,
         cheapest.get("logistics_seller"), cheapest.get("price_forward"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Retry delivery after LSP cancellation
+# ---------------------------------------------------------------------------
+
+def _extract_city_from_address(address: str) -> str:
+    """Extract city from a Google-formatted Indian address.
+
+    'L73, 15th Cross Rd, Sector 6, HSR Layout, Bengaluru, Karnataka 560102, India'
+    → 'Bengaluru'
+    """
+    parts = [p.strip() for p in (address or "").split(",")]
+    if len(parts) >= 3:
+        return parts[-3].strip()
+    return parts[-1].strip() if parts else ""
+
+
+async def retry_delivery(ticket_id: str) -> None:
+    """
+    Retry delivery with the next available LSP after a cancellation.
+    Re-quotes, excludes previously failed LSPs, picks the cheapest remaining.
+    """
+    order = get_logistics_order(ticket_id)
+    if not order:
+        logger.error("Ticket %s: no logistics order found for retry", ticket_id)
+        return
+
+    failed_lsps = get_failed_lsp_ids(ticket_id)
+    max_retries = Config.MAX_DELIVERY_RETRIES
+
+    if len(failed_lsps) >= max_retries:
+        logger.warning(
+            "Ticket %s: max delivery retries (%d) reached, giving up. Failed LSPs: %s",
+            ticket_id, max_retries, failed_lsps,
+        )
+        update_ticket_status(
+            ticket_id, "delivery_failed",
+            error_message=f"All delivery attempts failed after {len(failed_lsps)} retries",
+        )
+        return
+
+    logger.info(
+        "Ticket %s: retrying delivery (attempt %d/%d, excluding LSPs: %s)",
+        ticket_id, len(failed_lsps) + 1, max_retries, failed_lsps,
+    )
+    update_ticket_status(ticket_id, "retrying_delivery")
+
+    pickup_lat = order["pickup_lat"]
+    pickup_lng = order["pickup_lng"]
+    drop_lat = order["drop_lat"]
+    drop_lng = order["drop_lng"]
+    city = _extract_city_from_address(order.get("drop_address") or "")
+
+    # --- Fresh quotes ---
+    try:
+        quotes_resp = await get_delivery_quotes(
+            pickup_lat=pickup_lat,
+            pickup_lng=pickup_lng,
+            pickup_pincode=order["pickup_pincode"] or "000000",
+            drop_lat=drop_lat,
+            drop_lng=drop_lng,
+            drop_pincode=order["drop_pincode"] or "000000",
+            city=city,
+            order_amount=order["order_amount"] or 0,
+            order_weight=order["order_weight"] or 1.0,
+        )
+    except Exception as e:
+        logger.exception("Ticket %s: re-quote failed during retry", ticket_id)
+        update_ticket_status(ticket_id, "delivery_failed", error_message=f"Retry quotes failed: {e}")
+        return
+
+    if quotes_resp.get("status") != 1 or not quotes_resp.get("quotes"):
+        msg = quotes_resp.get("message", "No delivery partners available on retry")
+        update_ticket_status(ticket_id, "delivery_failed", error_message=msg)
+        return
+
+    # --- Filter out failed LSPs and pick cheapest ---
+    available = [q for q in quotes_resp["quotes"] if q.get("lsp_id") not in failed_lsps]
+    if not available:
+        logger.warning("Ticket %s: no LSPs left after excluding %s", ticket_id, failed_lsps)
+        update_ticket_status(
+            ticket_id, "delivery_failed",
+            error_message=f"No delivery partners left (excluded {len(failed_lsps)} failed LSPs)",
+        )
+        return
+
+    cheapest = min(available, key=lambda q: float(q.get("price_forward", 999999)))
+    quote_id = quotes_resp.get("quote_id")
+
+    logger.info(
+        "Ticket %s retry: picked LSP = %s (₹%s, pickup ETA %s min)",
+        ticket_id, cheapest.get("logistics_seller"),
+        cheapest.get("price_forward"), cheapest.get("pickup_eta"),
+    )
+
+    # --- New logistics order record ---
+    short_uid = uuid.uuid4().hex[:8]
+    client_order_id = f"{ticket_id}_{short_uid}"
+
+    logistics_id = create_logistics_order(
+        ticket_id=ticket_id,
+        store_call_id=order["store_call_id"],
+        client_order_id=client_order_id,
+        pickup_lat=pickup_lat,
+        pickup_lng=pickup_lng,
+        pickup_address=order["pickup_address"],
+        pickup_pincode=order["pickup_pincode"],
+        pickup_phone=order["pickup_phone"],
+        drop_lat=drop_lat,
+        drop_lng=drop_lng,
+        drop_address=order["drop_address"],
+        drop_pincode=order["drop_pincode"],
+        drop_phone=order["drop_phone"],
+        customer_name=order["customer_name"],
+        order_amount=order["order_amount"],
+        order_weight=order["order_weight"],
+    )
+
+    # --- Build payloads reusing stored addresses ---
+    drop_state = ""
+    addr_parts = (order.get("drop_address") or "").split(",")
+    if len(addr_parts) >= 2:
+        drop_state = addr_parts[-2].strip().split()[0] if addr_parts[-2].strip() else ""
+
+    pickup_payload = {
+        "lat": pickup_lat,
+        "lng": pickup_lng,
+        "address": {
+            "name": "Store",
+            "line1": order["pickup_address"] or "",
+            "line2": "",
+            "city": city,
+            "state": drop_state,
+        },
+        "pincode": order["pickup_pincode"] or "000000",
+        "phone": (order["pickup_phone"] or "").lstrip("+").replace(" ", ""),
+    }
+
+    drop_payload = {
+        "lat": drop_lat,
+        "lng": drop_lng,
+        "address": {
+            "name": order["customer_name"] or "Customer",
+            "line1": order["drop_address"] or "",
+            "line2": "",
+            "city": city,
+            "state": drop_state,
+        },
+        "pincode": order["drop_pincode"] or "000000",
+        "phone": (order["drop_phone"] or "").lstrip("+").replace(" ", ""),
+    }
+
+    callback_url = f"{Config.VAPI_SERVER_URL}/api/logistics/callback"
+
+    product = get_product(ticket_id)
+    product_name = product["product_name"] if product else "Item"
+
+    order_items = [{
+        "name": product_name,
+        "qty": 1,
+        "price": order["order_amount"] or 0,
+    }]
+
+    # --- Place the new delivery order ---
+    try:
+        order_resp = await create_delivery_order(
+            client_order_id=client_order_id,
+            pickup=pickup_payload,
+            drop=drop_payload,
+            callback_url=callback_url,
+            order_amount=order["order_amount"] or 0,
+            order_weight=order["order_weight"] or 1.0,
+            order_items=order_items,
+            selected_lsp_id=cheapest["lsp_id"],
+            quote_id=quote_id,
+        )
+    except Exception as e:
+        logger.exception("Ticket %s: retry create order failed", ticket_id)
+        update_logistics_order_error(logistics_id, f"Retry create order failed: {e}")
+        update_ticket_status(ticket_id, "delivery_failed", error_message=f"Retry order creation failed: {e}")
+        return
+
+    if order_resp.get("status") != 1:
+        msg = order_resp.get("message", "Retry order creation failed")
+        update_logistics_order_error(logistics_id, msg)
+        update_ticket_status(ticket_id, "delivery_failed", error_message=msg)
+        return
+
+    # --- Success ---
+    order_data = order_resp.get("order", {})
+    new_prorouting_id = order_data.get("id", "")
+    new_state = order_data.get("state", "UnFulfilled")
+
+    update_logistics_order_placed(
+        logistics_order_id=logistics_id,
+        prorouting_order_id=new_prorouting_id,
+        order_state=new_state,
+        quote_id=quote_id,
+        selected_lsp_id=cheapest["lsp_id"],
+        selected_lsp_name=cheapest.get("logistics_seller"),
+        quoted_price=float(cheapest.get("price_forward", 0)),
+    )
+
+    update_ticket_status(ticket_id, "order_placed")
+    logger.info(
+        "Ticket %s: RETRY delivery placed! prorouting_id=%s, lsp=%s, price=₹%s (attempt %d)",
+        ticket_id, new_prorouting_id,
+        cheapest.get("logistics_seller"), cheapest.get("price_forward"),
+        len(failed_lsps) + 1,
     )

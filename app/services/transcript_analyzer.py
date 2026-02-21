@@ -14,6 +14,7 @@ from app.db.tickets import (
     get_store_calls_for_ticket,
     get_product,
     get_ticket,
+    get_web_deals,
     count_pending_calls,
     set_ticket_final_result,
     update_ticket_status,
@@ -170,6 +171,13 @@ async def _compile_final_result(ticket_id: str) -> None:
                 for c in connected_calls + failed_calls
             ],
         }
+        web_deals = get_web_deals(ticket_id)
+        if web_deals and web_deals.get("deals"):
+            no_result["web_deals"] = web_deals
+            no_result["message"] = (
+                "None of the local stores had the product, "
+                "but we found online deals for you!"
+            )
         set_ticket_final_result(ticket_id, no_result)
         return
 
@@ -259,6 +267,10 @@ async def _compile_final_result(ticket_id: str) -> None:
         "calls_failed": len(failed_calls),
         "stores_with_product": len(available_calls),
     }
+
+    web_deals = get_web_deals(ticket_id)
+    if web_deals and web_deals.get("deals"):
+        final["web_deals"] = web_deals
 
     set_ticket_final_result(ticket_id, final)
     logger.info(

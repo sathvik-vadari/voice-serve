@@ -17,12 +17,16 @@ from app.db.tickets import (
     get_product,
     get_stores,
     get_logistics_order,
+    get_web_deals,
 )
+import asyncio
+
 from app.services.orchestrator import classify_query
 from app.services.product_research import research_product
 from app.services.google_maps import find_stores
 from app.services.store_caller import call_stores
 from app.services.gemini_client import analyze_query, rerank_stores
+from app.services.web_deals import search_web_deals
 from app.services.options_summary import generate_options_summary
 from app.services.logistics import place_order
 
@@ -39,6 +43,7 @@ class TicketRequest(BaseModel):
     user_name: Optional[str] = None
     test_mode: Optional[bool] = None
     test_phone: Optional[str] = None
+    max_stores: Optional[int] = None
 
 
 class TicketResponse(BaseModel):
@@ -79,9 +84,13 @@ async def create_ticket_endpoint(req: TicketRequest, bg: BackgroundTasks):
     if is_test:
         logger.info("TEST MODE active (phone=%s) – will not call real stores", test_phone)
 
+    max_stores = req.max_stores
+    if max_stores is not None:
+        max_stores = max(1, min(10, max_stores))
+
     bg.add_task(
         _process_ticket, ticket_id, req.query, req.location, req.user_phone,
-        test_mode=is_test, test_phone=test_phone,
+        test_mode=is_test, test_phone=test_phone, max_stores=max_stores,
     )
 
     return TicketResponse(
@@ -142,6 +151,17 @@ async def get_ticket_status(ticket_id: str):
                 "calls_total": len(calls),
                 "calls_completed": sum(1 for c in calls if c["status"] in ("analyzed", "failed")),
                 "calls_in_progress": sum(1 for c in calls if c["status"] not in ("analyzed", "failed")),
+            }
+
+        web_deals = get_web_deals(ticket_id)
+        if web_deals and web_deals.get("deals"):
+            response["web_deals"] = {
+                "search_summary": web_deals.get("search_summary"),
+                "deals": web_deals.get("deals", []),
+                "best_deal": web_deals.get("best_deal"),
+                "surprise_finds": web_deals.get("surprise_finds"),
+                "price_range": web_deals.get("price_range"),
+                "status": web_deals.get("status"),
             }
 
         logistics = get_logistics_order(ticket_id)
@@ -207,7 +227,14 @@ async def confirm_ticket_option(ticket_id: str, req: ConfirmRequest):
     if not ticket:
         return JSONResponse(status_code=404, content={"error": "Ticket not found"})
 
-    allowed = ("completed", "failed", "placing_order", "order_placed")
+    already_ordering = ("placing_order", "order_placed", "agent_assigned", "out_for_delivery")
+    if ticket["status"] in already_ordering:
+        return JSONResponse(
+            status_code=409,
+            content={"error": f"A delivery is already in progress (status: {ticket['status']})", "ticket_id": ticket_id},
+        )
+
+    allowed = ("completed", "failed", "delivery_failed")
     if ticket["status"] not in allowed:
         return JSONResponse(
             status_code=400,
@@ -325,6 +352,7 @@ async def get_delivery_status(ticket_id: str):
 async def _process_ticket(
     ticket_id: str, query: str, location: str, user_phone: str,
     *, test_mode: bool = False, test_phone: Optional[str] = None,
+    max_stores: Optional[int] = None,
 ) -> None:
     """Full async pipeline: classify → research → find stores → call stores."""
     try:
@@ -339,7 +367,7 @@ async def _process_ticket(
         if query_type == "wakeup_alarm":
             await _handle_wakeup(ticket_id, query, user_phone)
         else:
-            await _handle_order(ticket_id, query, location, test_mode=test_mode, test_phone=test_phone)
+            await _handle_order(ticket_id, query, location, test_mode=test_mode, test_phone=test_phone, max_stores=max_stores)
 
     except Exception as e:
         logger.exception("Pipeline failed for ticket %s", ticket_id)
@@ -371,8 +399,9 @@ async def _handle_wakeup(ticket_id: str, query: str, user_phone: str) -> None:
 async def _handle_order(
     ticket_id: str, query: str, location: str,
     *, test_mode: bool = False, test_phone: Optional[str] = None,
+    max_stores: Optional[int] = None,
 ) -> None:
-    """Handle order/product flow: analyze → research → find stores → rerank → call."""
+    """Handle order/product flow: analyze → research → [web search + find stores + call] in parallel."""
 
     # Step 2a: Gemini query intelligence
     query_analysis = None
@@ -399,7 +428,13 @@ async def _handle_order(
         product.get("avg_price_online"), len(product.get("alternatives") or []),
     )
 
-    # Step 2c: Find stores via Google Maps (multi-strategy)
+    # Step 2c: Launch web deals search in parallel with store discovery + calling.
+    # The web search runs independently — if it fails, store calling continues.
+    web_deals_task = asyncio.create_task(
+        _search_web_deals_safe(ticket_id, query, product, location)
+    )
+
+    # Step 2d: Find stores via Google Maps (multi-strategy)
     update_ticket_status(ticket_id, "finding_stores")
 
     search_queries = None
@@ -408,15 +443,21 @@ async def _handle_order(
     elif product.get("_search_queries"):
         search_queries = product["_search_queries"]
 
+    specific_store_name = None
+    if query_analysis and query_analysis.get("is_specific_store"):
+        specific_store_name = query_analysis.get("specific_store_name")
+
     stores = await find_stores(
         ticket_id,
         product.get("store_search_query", "store"),
         location,
+        max_stores=max_stores,
         search_queries=search_queries,
+        specific_store_name=specific_store_name,
     )
     logger.info("Ticket %s: found %d callable stores", ticket_id, len(stores))
 
-    # Step 2d: Gemini re-ranking (prioritize exact store matches)
+    # Step 2e: Gemini re-ranking (prioritize exact store matches)
     if query_analysis and stores and len(stores) > 1:
         try:
             reranked = await rerank_stores(ticket_id, query, stores, query_analysis)
@@ -429,15 +470,24 @@ async def _handle_order(
             logger.warning("Store re-ranking failed for ticket %s: %s", ticket_id, e)
 
     if not stores:
+        # Even with no stores, wait for web deals — they might still help
+        web_deals = await web_deals_task
         from app.db.tickets import set_ticket_final_result
-        set_ticket_final_result(ticket_id, {
+        result = {
             "status": "no_stores",
             "message": "Could not find any stores with phone numbers near the given location.",
             "product": product.get("product_name"),
-        })
+        }
+        if web_deals and web_deals.get("deals"):
+            result["status"] = "web_deals_only"
+            result["message"] = (
+                "No local stores found, but we found online deals for you!"
+            )
+            result["web_deals"] = web_deals
+        set_ticket_final_result(ticket_id, result)
         return
 
-    # Step 2e: Call stores via VAPI
+    # Step 2f: Call stores via VAPI
     if test_mode:
         logger.info(
             "TEST MODE: Found %d stores but will only call test number %s",
@@ -447,10 +497,11 @@ async def _handle_order(
         call_results = await call_stores(
             ticket_id, product, location,
             test_mode=True, test_phone=test_phone or Config.TEST_PHONE,
+            max_stores=max_stores,
         )
     else:
         update_ticket_status(ticket_id, "calling_stores")
-        call_results = await call_stores(ticket_id, product, location)
+        call_results = await call_stores(ticket_id, product, location, max_stores=max_stores)
 
     logger.info(
         "Ticket %s: initiated %d store calls (%d successful)",
@@ -460,9 +511,26 @@ async def _handle_order(
 
     active_calls = [r for r in call_results if r["status"] == "calling"]
     if not active_calls:
+        web_deals = await web_deals_task
         from app.db.tickets import set_ticket_final_result
-        set_ticket_final_result(ticket_id, {
+        result = {
             "status": "call_failed",
             "message": "All store calls failed to initiate.",
             "product": product.get("product_name"),
-        })
+        }
+        if web_deals and web_deals.get("deals"):
+            result["web_deals"] = web_deals
+        set_ticket_final_result(ticket_id, result)
+
+
+async def _search_web_deals_safe(
+    ticket_id: str, query: str, product: dict, location: str,
+) -> dict:
+    """Wrapper that never raises — web deals are best-effort alongside store calls."""
+    try:
+        result = await search_web_deals(ticket_id, query, product, location)
+        logger.info("Ticket %s: web deals search completed", ticket_id)
+        return result
+    except Exception as e:
+        logger.warning("Web deals search failed for ticket %s: %s", ticket_id, e)
+        return {"deals": [], "error": str(e)}

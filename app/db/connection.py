@@ -166,6 +166,21 @@ CREATE TABLE IF NOT EXISTS tool_call_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS web_deals (
+    id SERIAL PRIMARY KEY,
+    ticket_id VARCHAR(255) NOT NULL REFERENCES tickets(ticket_id) ON DELETE CASCADE,
+    product_searched VARCHAR(500),
+    search_summary TEXT,
+    deals JSONB DEFAULT '[]'::jsonb,
+    best_deal JSONB,
+    surprise_finds TEXT,
+    price_range JSONB,
+    grounding_metadata JSONB,
+    status VARCHAR(50) NOT NULL DEFAULT 'completed',
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_tickets_ticket_id ON tickets(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 CREATE INDEX IF NOT EXISTS idx_store_calls_vapi_id ON store_calls(vapi_call_id);
@@ -175,6 +190,7 @@ CREATE INDEX IF NOT EXISTS idx_tool_logs_ticket ON tool_call_logs(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_logistics_orders_ticket ON logistics_orders(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_logistics_orders_prorouting ON logistics_orders(prorouting_order_id);
 CREATE INDEX IF NOT EXISTS idx_logistics_orders_client ON logistics_orders(client_order_id);
+CREATE INDEX IF NOT EXISTS idx_web_deals_ticket ON web_deals(ticket_id);
 """
 
 _MIGRATION_SQL = """
@@ -184,6 +200,7 @@ DO $$ BEGIN
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tool_calls_made JSONB;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS user_name VARCHAR(255);
     ALTER TABLE store_calls ADD COLUMN IF NOT EXISTS transcript_json JSONB;
+    ALTER TABLE store_calls ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;
 EXCEPTION WHEN others THEN NULL;
 END $$;
 

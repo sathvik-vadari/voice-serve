@@ -70,6 +70,7 @@ def _build_store_prompt(
 async def call_stores(
     ticket_id: str, product: dict[str, Any], location: str,
     *, test_mode: bool = False, test_phone: str | None = None,
+    max_stores: int | None = None,
 ) -> list[dict[str, Any]]:
     """
     Initiate VAPI calls to stores saved for this ticket.
@@ -77,19 +78,30 @@ async def call_stores(
     In test_mode: only places ONE call to test_phone (using the first store's
     context) so you can hear the bot without calling real stores.
     """
+    ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    open_hour, close_hour, close_minute = 10, 22, 30  # 10:00 AM – 10:30 PM IST
+    ist_time = ist_now.hour * 60 + ist_now.minute
+    if ist_time < open_hour * 60 or ist_time >= close_hour * 60 + close_minute:
+        logger.warning(
+            "Ticket %s: skipping all calls — current IST time %s is outside calling window (%02d:%02d–%02d:%02d)",
+            ticket_id, ist_now.strftime("%I:%M %p"), open_hour, 0, close_hour, close_minute,
+        )
+        return []
+
     stores = get_stores(ticket_id)
     if not stores:
         logger.warning("No stores to call for ticket %s", ticket_id)
         return []
 
+    cap = max_stores or MAX_STORES
     if test_mode:
         targets = stores[:1]
     else:
-        targets = stores[:MAX_STORES]
-        if len(stores) > MAX_STORES:
+        targets = stores[:cap]
+        if len(stores) > cap:
             logger.info(
-                "Ticket %s has %d stores, capping to MAX_STORES_TO_CALL=%d",
-                ticket_id, len(stores), MAX_STORES,
+                "Ticket %s has %d stores, capping to max_stores=%d",
+                ticket_id, len(stores), cap,
             )
 
     results = []
