@@ -7,7 +7,9 @@ import uvicorn
 
 from app.helpers.config import Config
 from app.helpers.logger import setup_logger
+from app.db.connection import init_db
 from app.routes import vapi_webhook_routes
+from app.routes import ticket_routes
 from app.services.wakeup_scheduler import start_wakeup_scheduler, stop_wakeup_scheduler
 
 logger = setup_logger(__name__)
@@ -15,16 +17,16 @@ logger = setup_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start wake-up scheduler on startup; stop on shutdown."""
+    init_db()
     start_wakeup_scheduler()
     yield
     stop_wakeup_scheduler()
 
 
 app = FastAPI(
-    title="VAPI Wake-Up Bot",
-    description="Wake-up call bot using VAPI phone calls",
-    version="0.1.0",
+    title="Voice Commerce Service",
+    description="Multi-LLM voice service – order anything, schedule wake-up calls, and more",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -37,27 +39,31 @@ app.add_middleware(
 )
 
 app.include_router(vapi_webhook_routes.router)
+app.include_router(ticket_routes.router)
 
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
     return {
-        "service": "VAPI Wake-Up Bot",
+        "service": "Voice Commerce Service",
         "status": "running",
-        "version": "0.1.0",
+        "version": "0.2.0",
+        "endpoints": {
+            "create_ticket": "POST /api/ticket",
+            "get_ticket": "GET /api/ticket/{ticket_id}",
+            "vapi_webhook": "POST /api/vapi/webhook",
+            "store_webhook": "POST /api/vapi/store-webhook",
+        },
     }
 
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
     return {"status": "healthy"}
 
 
 def main():
-    """Main function to run the server."""
-    logger.info("Starting VAPI Wake-Up Bot")
+    logger.info("Starting Voice Commerce Service")
     uvicorn.run(
         "app.main:app",
         host=Config.SERVER_HOST,

@@ -1,4 +1,4 @@
-"""Database layer for wake-up call preferences and scheduled calls."""
+"""Database layer."""
 from app.db.connection import get_connection, init_db
 from app.db.wakeup import (
     get_or_create_user,

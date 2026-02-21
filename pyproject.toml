@@ -1,7 +1,7 @@
 [project]
 name = "voice-serve"
-version = "0.1.0"
-description = "VAPI voice call bot"
+version = "0.2.0"
+description = "Multi-LLM voice commerce service – order anything via phone calls"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,4 +10,6 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "aiohttp>=3.9.0",
     "psycopg2-binary>=2.9.9",
+    "openai>=1.30.0",
+    "google-genai>=1.0.0",
 ]
