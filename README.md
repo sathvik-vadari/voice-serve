@@ -46,7 +46,12 @@ User submits query
 │ Summary      │     successful calls + structured transcripts
 └──────┬───────┘
        ▼
-  User message: ranked options with pricing, delivery, and transcript insights
+  User picks an option
+        │
+        ▼
+┌──────────────┐
+│  Logistics   │  ← ProRouting: geocode → quote → book → track delivery
+└──────────────┘
 ```
 
 ## Tech Stack
@@ -54,9 +59,10 @@ User submits query
 | Layer | Tech |
 |-------|------|
 | Framework | FastAPI + Uvicorn |
-| LLMs | OpenAI GPT-4o, Google Gemini |
+| LLMs | OpenAI GPT-4o, Google Gemini 2.0 Flash |
 | Voice / Telephony | VAPI (Deepgram transcription, Cartesia TTS) |
 | Store Discovery | Google Maps Places API |
+| Logistics | ProRouting (geocoding, quoting, delivery booking & tracking) |
 | Database | PostgreSQL |
 | Language | Python 3.12+ |
 
@@ -76,7 +82,8 @@ app/
 │   └── regional.py          # Per-city language & persona config
 ├── prompts/                 # LLM prompt templates (.txt)
 ├── routes/
-│   ├── ticket_routes.py     # REST API endpoints
+│   ├── ticket_routes.py     # Ticket REST API endpoints
+│   ├── logistics_routes.py  # ProRouting delivery callbacks
 │   └── vapi_webhook_routes.py  # VAPI event handlers
 ├── schemas/
 │   ├── tool_handlers.py     # Tool execution logic
@@ -89,6 +96,8 @@ app/
 │   ├── store_caller.py      # Outbound call orchestration
 │   ├── transcript_analyzer.py  # Post-call structured extraction
 │   ├── options_summary.py   # User-facing options message generator
+│   ├── logistics.py         # ProRouting delivery booking & tracking
+│   ├── geocoding.py         # Forward/reverse geocoding & pincode extraction
 │   ├── vapi_client.py       # VAPI API wrapper
 │   └── wakeup_scheduler.py  # Background scheduler for wake-up calls
 └── scripts/
@@ -104,6 +113,18 @@ app/
 | `POST` | `/api/ticket` | Create a ticket — kicks off the full pipeline in the background |
 | `GET`  | `/api/ticket/{ticket_id}` | Poll for status, progress, and results |
 | `GET`  | `/api/ticket/{ticket_id}/options` | Get user-facing summary of all successful call options |
+| `POST` | `/api/ticket/{ticket_id}/confirm` | Confirm an option — triggers delivery booking via ProRouting |
+| `GET`  | `/api/ticket/{ticket_id}/delivery` | Get logistics/delivery status & tracking info |
+
+**Create ticket payload:**
+
+```json
+{
+  "query": "I need a 2kg Prestige pressure cooker",
+  "location": "Indiranagar, Bangalore",
+  "user_phone": "+919876543210"
+}
+```
 
 **Options response** (hit after ticket is `completed`):
 
@@ -129,15 +150,11 @@ app/
 }
 ```
 
-**Create ticket payload:**
+### Logistics
 
-```json
-{
-  "query": "I need a 2kg Prestige pressure cooker",
-  "location": "Indiranagar, Bangalore",
-  "user_phone": "+919876543210"
-}
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/logistics/callback` | ProRouting status callbacks (agent assigned, picked up, delivered, etc.) |
 
 ### VAPI Webhooks
 
@@ -161,6 +178,7 @@ app/
 - PostgreSQL
 - A [VAPI](https://vapi.ai) account with a phone number
 - API keys for OpenAI, Google Gemini, and Google Maps
+- A [ProRouting](https://prorouting.in) account for delivery logistics
 - A public URL for webhooks (e.g. ngrok during development)
 
 ### Install
@@ -180,7 +198,7 @@ Copy the example env file and fill in your keys:
 cp .env.example .env
 ```
 
-You'll need API keys for OpenAI, Google Maps, Google Gemini, and VAPI. See [`.env.example`](.env.example) for all available options.
+You'll need API keys for OpenAI, Google Maps, Google Gemini, VAPI, and ProRouting. See [`.env.example`](.env.example) for all available options.
 
 ### Run
 
@@ -192,7 +210,7 @@ The server starts on `http://0.0.0.0:8000` by default. The database schema is au
 
 ## Database Schema
 
-Seven tables, auto-migrated on startup:
+Nine tables, auto-migrated on startup:
 
 | Table | Purpose |
 |-------|---------|
@@ -200,9 +218,11 @@ Seven tables, auto-migrated on startup:
 | `ticket_products` | Extracted product details & specs (JSONB) |
 | `ticket_stores` | Discovered stores with location & call priority |
 | `store_calls` | Per-store call records: transcript (text + structured JSON), analysis, pricing |
+| `logistics_orders` | Delivery orders: pickup/drop addresses, LSP selection, rider tracking |
 | `wakeup_users` | User preferences (daily wake-up time, do-not-call) |
 | `scheduled_calls` | Pending/completed wake-up calls |
 | `llm_logs` | Full LLM call audit trail (prompt, response, tokens, latency) |
+| `tool_call_logs` | VAPI tool execution audit trail (input, output, status, latency) |
 
 ## Regional Support
 
