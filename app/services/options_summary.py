@@ -65,6 +65,8 @@ def _build_options(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         analysis = c.get("call_analysis") or {}
         option: dict[str, Any] = {
+            "store_call_id": c.get("id"),
+            "store_id": c.get("store_id"),
             "store_name": c.get("store_name"),
             "address": c.get("address"),
             "phone_number": c.get("phone_number"),

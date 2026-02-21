@@ -10,6 +10,7 @@ from app.helpers.logger import setup_logger
 from app.db.connection import init_db
 from app.routes import vapi_webhook_routes
 from app.routes import ticket_routes
+from app.routes import logistics_routes
 from app.services.wakeup_scheduler import start_wakeup_scheduler, stop_wakeup_scheduler
 
 logger = setup_logger(__name__)
@@ -40,6 +41,7 @@ app.add_middleware(
 
 app.include_router(vapi_webhook_routes.router)
 app.include_router(ticket_routes.router)
+app.include_router(logistics_routes.router)
 
 
 @app.get("/")
@@ -51,8 +53,12 @@ async def root():
         "endpoints": {
             "create_ticket": "POST /api/ticket",
             "get_ticket": "GET /api/ticket/{ticket_id}",
+            "get_options": "GET /api/ticket/{ticket_id}/options",
+            "confirm_order": "POST /api/ticket/{ticket_id}/confirm",
+            "delivery_status": "GET /api/ticket/{ticket_id}/delivery",
             "vapi_webhook": "POST /api/vapi/webhook",
             "store_webhook": "POST /api/vapi/store-webhook",
+            "logistics_callback": "POST /api/logistics/callback",
         },
     }
 

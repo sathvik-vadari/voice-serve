@@ -46,18 +46,19 @@ def ticket_exists_and_active(ticket_id: str) -> bool:
     active_statuses = (
         "received", "classifying", "analyzing", "researching",
         "finding_stores", "calling_stores", "wakeup_calling", "wakeup_in_progress",
+        "placing_order", "order_placed", "agent_assigned", "out_for_delivery",
     )
     return row[0] in active_statuses
 
 
-def create_ticket(ticket_id: str, query: str, location: str, user_phone: Optional[str] = None) -> dict[str, Any]:
+def create_ticket(ticket_id: str, query: str, location: str, user_phone: Optional[str] = None, user_name: Optional[str] = None) -> dict[str, Any]:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO tickets (ticket_id, query, location, user_phone, status)
-                   VALUES (%s, %s, %s, %s, 'received')
+                """INSERT INTO tickets (ticket_id, query, location, user_phone, user_name, status)
+                   VALUES (%s, %s, %s, %s, %s, 'received')
                    RETURNING id, ticket_id, status, created_at""",
-                (ticket_id, query, location, user_phone),
+                (ticket_id, query, location, user_phone, user_name),
             )
             row = cur.fetchone()
     return {"id": row[0], "ticket_id": row[1], "status": row[2], "created_at": row[3].isoformat()}
@@ -96,7 +97,7 @@ def get_ticket(ticket_id: str) -> Optional[dict[str, Any]]:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, ticket_id, query, location, user_phone, query_type,
+                """SELECT id, ticket_id, query, location, user_phone, user_name, query_type,
                           status, vapi_call_id, transcript, tool_calls_made,
                           final_result, error_message, created_at, updated_at
                    FROM tickets WHERE ticket_id = %s""",
@@ -107,11 +108,11 @@ def get_ticket(ticket_id: str) -> Optional[dict[str, Any]]:
         return None
     return {
         "id": row[0], "ticket_id": row[1], "query": row[2], "location": row[3],
-        "user_phone": row[4], "query_type": row[5], "status": row[6],
-        "vapi_call_id": row[7], "transcript": row[8], "tool_calls_made": row[9],
-        "final_result": row[10], "error_message": row[11],
-        "created_at": row[12].isoformat() if row[12] else None,
-        "updated_at": row[13].isoformat() if row[13] else None,
+        "user_phone": row[4], "user_name": row[5], "query_type": row[6], "status": row[7],
+        "vapi_call_id": row[8], "transcript": row[9], "tool_calls_made": row[10],
+        "final_result": row[11], "error_message": row[12],
+        "created_at": row[13].isoformat() if row[13] else None,
+        "updated_at": row[14].isoformat() if row[14] else None,
     }
 
 
@@ -443,6 +444,29 @@ def get_store_calls_for_ticket(ticket_id: str) -> list[dict[str, Any]]:
     ]
 
 
+def get_store_by_id(store_id: int) -> Optional[dict[str, Any]]:
+    """Get full store details including lat/lng by internal store ID."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, ticket_id, store_name, address, phone_number,
+                          rating, total_ratings, place_id, latitude, longitude, call_priority
+                   FROM ticket_stores WHERE id = %s""",
+                (store_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0], "ticket_id": row[1], "store_name": row[2], "address": row[3],
+        "phone_number": row[4], "rating": float(row[5]) if row[5] else None,
+        "total_ratings": row[6], "place_id": row[7],
+        "latitude": float(row[8]) if row[8] else None,
+        "longitude": float(row[9]) if row[9] else None,
+        "call_priority": row[10],
+    }
+
+
 def count_pending_calls(ticket_id: str) -> int:
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -504,3 +528,176 @@ def log_tool_call(
                 ),
             )
             return cur.fetchone()[0]
+
+
+# ---------------------------------------------------------------------------
+# Logistics orders
+# ---------------------------------------------------------------------------
+
+def create_logistics_order(
+    ticket_id: str,
+    store_call_id: int,
+    client_order_id: str,
+    *,
+    pickup_lat: float = None,
+    pickup_lng: float = None,
+    pickup_address: str = None,
+    pickup_pincode: str = None,
+    pickup_phone: str = None,
+    drop_lat: float = None,
+    drop_lng: float = None,
+    drop_address: str = None,
+    drop_pincode: str = None,
+    drop_phone: str = None,
+    customer_name: str = None,
+    order_amount: float = None,
+    order_weight: float = 1.0,
+) -> int:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO logistics_orders
+                       (ticket_id, store_call_id, client_order_id,
+                        pickup_lat, pickup_lng, pickup_address, pickup_pincode, pickup_phone,
+                        drop_lat, drop_lng, drop_address, drop_pincode, drop_phone,
+                        customer_name, order_amount, order_weight, order_state)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
+                   RETURNING id""",
+                (
+                    ticket_id, store_call_id, client_order_id,
+                    pickup_lat, pickup_lng, pickup_address, pickup_pincode, pickup_phone,
+                    drop_lat, drop_lng, drop_address, drop_pincode, drop_phone,
+                    customer_name, order_amount, order_weight,
+                ),
+            )
+            return cur.fetchone()[0]
+
+
+def update_logistics_order_placed(
+    logistics_order_id: int,
+    prorouting_order_id: str,
+    order_state: str,
+    quote_id: Optional[str] = None,
+    selected_lsp_id: Optional[str] = None,
+    selected_lsp_name: Optional[str] = None,
+    quoted_price: Optional[float] = None,
+) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE logistics_orders SET
+                       prorouting_order_id = %s, order_state = %s,
+                       quote_id = %s, selected_lsp_id = %s, selected_lsp_name = %s,
+                       quoted_price = %s, updated_at = NOW()
+                   WHERE id = %s""",
+                (
+                    prorouting_order_id, order_state,
+                    quote_id, selected_lsp_id, selected_lsp_name,
+                    quoted_price, logistics_order_id,
+                ),
+            )
+
+
+def update_logistics_order_status(
+    prorouting_order_id: str,
+    order_state: str,
+    *,
+    rider_name: Optional[str] = None,
+    rider_phone: Optional[str] = None,
+    tracking_url: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> Optional[str]:
+    """Update logistics order state and rider info. Returns the ticket_id."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE logistics_orders SET
+                       order_state = %s,
+                       rider_name = COALESCE(%s, rider_name),
+                       rider_phone = COALESCE(%s, rider_phone),
+                       tracking_url = COALESCE(%s, tracking_url),
+                       error_message = COALESCE(%s, error_message),
+                       updated_at = NOW()
+                   WHERE prorouting_order_id = %s
+                   RETURNING ticket_id""",
+                (
+                    order_state, rider_name, rider_phone,
+                    tracking_url, error_message, prorouting_order_id,
+                ),
+            )
+            row = cur.fetchone()
+    return row[0] if row else None
+
+
+def append_logistics_callback(prorouting_order_id: str, callback_data: dict) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE logistics_orders
+                   SET status_callbacks = COALESCE(status_callbacks, '[]'::jsonb) || %s::jsonb,
+                       updated_at = NOW()
+                   WHERE prorouting_order_id = %s""",
+                (json.dumps([callback_data], default=str), prorouting_order_id),
+            )
+
+
+def update_logistics_order_error(logistics_order_id: int, error_message: str) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE logistics_orders SET order_state = 'failed', error_message = %s,
+                       updated_at = NOW() WHERE id = %s""",
+                (error_message, logistics_order_id),
+            )
+
+
+def get_logistics_order(ticket_id: str) -> Optional[dict[str, Any]]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, ticket_id, store_call_id, client_order_id, prorouting_order_id,
+                          quote_id, selected_lsp_id, selected_lsp_name, quoted_price,
+                          pickup_lat, pickup_lng, pickup_address, pickup_pincode, pickup_phone,
+                          drop_lat, drop_lng, drop_address, drop_pincode, drop_phone,
+                          customer_name, order_state, rider_name, rider_phone, tracking_url,
+                          status_callbacks, order_amount, order_weight, error_message,
+                          created_at, updated_at
+                   FROM logistics_orders WHERE ticket_id = %s
+                   ORDER BY created_at DESC LIMIT 1""",
+                (ticket_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0], "ticket_id": row[1], "store_call_id": row[2],
+        "client_order_id": row[3], "prorouting_order_id": row[4],
+        "quote_id": row[5], "selected_lsp_id": row[6], "selected_lsp_name": row[7],
+        "quoted_price": float(row[8]) if row[8] else None,
+        "pickup_lat": float(row[9]) if row[9] else None,
+        "pickup_lng": float(row[10]) if row[10] else None,
+        "pickup_address": row[11], "pickup_pincode": row[12], "pickup_phone": row[13],
+        "drop_lat": float(row[14]) if row[14] else None,
+        "drop_lng": float(row[15]) if row[15] else None,
+        "drop_address": row[16], "drop_pincode": row[17], "drop_phone": row[18],
+        "customer_name": row[19], "order_state": row[20],
+        "rider_name": row[21], "rider_phone": row[22], "tracking_url": row[23],
+        "status_callbacks": row[24], "order_amount": float(row[25]) if row[25] else None,
+        "order_weight": float(row[26]) if row[26] else None,
+        "error_message": row[27],
+        "created_at": row[28].isoformat() if row[28] else None,
+        "updated_at": row[29].isoformat() if row[29] else None,
+    }
+
+
+def get_logistics_order_by_prorouting_id(prorouting_order_id: str) -> Optional[dict[str, Any]]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT ticket_id FROM logistics_orders WHERE prorouting_order_id = %s",
+                (prorouting_order_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return get_logistics_order(row[0])

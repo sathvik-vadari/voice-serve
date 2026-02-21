@@ -55,6 +55,10 @@ class Config:
     MAX_STORES_TO_CALL: int = int(os.getenv("MAX_STORES_TO_CALL", "5"))
     MAX_ALTERNATIVES: int = int(os.getenv("MAX_ALTERNATIVES", "3"))
 
+    # ProRouting Logistics
+    PROROUTING_API_KEY: Optional[str] = os.getenv("PROROUTING_API_KEY")
+    PROROUTING_BASE_URL: str = os.getenv("PROROUTING_BASE_URL", "https://preprod-app.prorouting.in")
+
     # Test mode
     TEST_MODE: bool = os.getenv("TEST_MODE", "false").lower() in ("true", "1", "yes")
     TEST_PHONE: str = os.getenv("TEST_PHONE", "")

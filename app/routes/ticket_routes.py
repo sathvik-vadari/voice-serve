@@ -16,6 +16,7 @@ from app.db.tickets import (
     get_store_calls_for_ticket,
     get_product,
     get_stores,
+    get_logistics_order,
 )
 from app.services.orchestrator import classify_query
 from app.services.product_research import research_product
@@ -23,6 +24,7 @@ from app.services.google_maps import find_stores
 from app.services.store_caller import call_stores
 from app.services.gemini_client import analyze_query, rerank_stores
 from app.services.options_summary import generate_options_summary
+from app.services.logistics import place_order
 
 logger = setup_logger(__name__)
 
@@ -34,6 +36,7 @@ class TicketRequest(BaseModel):
     location: str
     ticket_id: Optional[str] = None
     user_phone: str
+    user_name: Optional[str] = None
     test_mode: Optional[bool] = None
     test_phone: Optional[str] = None
 
@@ -67,7 +70,7 @@ async def create_ticket_endpoint(req: TicketRequest, bg: BackgroundTasks):
             message=f"Ticket {ticket_id} is already being processed. Wait for it to complete or use a new ticket ID.",
         )
 
-    create_ticket(ticket_id, req.query, req.location, req.user_phone)
+    create_ticket(ticket_id, req.query, req.location, req.user_phone, req.user_name)
     logger.info("Ticket %s created: query=%r location=%r", ticket_id, req.query, req.location)
 
     is_test = req.test_mode if req.test_mode is not None else Config.TEST_MODE
@@ -141,6 +144,18 @@ async def get_ticket_status(ticket_id: str):
                 "calls_in_progress": sum(1 for c in calls if c["status"] not in ("analyzed", "failed")),
             }
 
+        logistics = get_logistics_order(ticket_id)
+        if logistics:
+            response["delivery"] = {
+                "order_state": logistics.get("order_state"),
+                "logistics_partner": logistics.get("selected_lsp_name"),
+                "delivery_price": logistics.get("quoted_price"),
+                "rider_name": logistics.get("rider_name"),
+                "rider_phone": logistics.get("rider_phone"),
+                "tracking_url": logistics.get("tracking_url"),
+                "prorouting_order_id": logistics.get("prorouting_order_id"),
+            }
+
     return response
 
 
@@ -160,6 +175,147 @@ async def get_ticket_options(ticket_id: str):
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=status_code, content=result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# POST /api/ticket/{ticket_id}/confirm – user confirms an option, triggers delivery
+# ---------------------------------------------------------------------------
+
+class ConfirmRequest(BaseModel):
+    store_call_id: Optional[int] = None
+    selected_option: Optional[int] = None
+    customer_name: Optional[str] = None
+
+
+@router.post("/api/ticket/{ticket_id}/confirm")
+async def confirm_ticket_option(ticket_id: str, req: ConfirmRequest):
+    """
+    User confirms which store option to buy from.
+    Pass either store_call_id (preferred, from options response) or
+    selected_option (1-based index into the options list).
+    Runs synchronously — returns the actual delivery booking result.
+    """
+    from fastapi.responses import JSONResponse
+
+    if not req.store_call_id and not req.selected_option:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Provide either store_call_id or selected_option"},
+        )
+
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        return JSONResponse(status_code=404, content={"error": "Ticket not found"})
+
+    allowed = ("completed", "failed", "placing_order", "order_placed")
+    if ticket["status"] not in allowed:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Ticket cannot be confirmed in status '{ticket['status']}'", "ticket_id": ticket_id},
+        )
+
+    resolved_name = req.customer_name or ticket.get("user_name")
+    if not resolved_name:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "customer_name is required (not provided at ticket creation or confirmation)"},
+        )
+
+    update_ticket_status(ticket_id, "placing_order")
+
+    try:
+        await place_order(
+            ticket_id,
+            store_call_id=req.store_call_id,
+            selected_option=req.selected_option,
+            customer_name=resolved_name,
+        )
+    except Exception as e:
+        logger.exception("Delivery order placement failed for ticket %s", ticket_id)
+        update_ticket_status(ticket_id, "failed", error_message=f"Delivery booking failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Delivery booking failed: {e}", "ticket_id": ticket_id},
+        )
+
+    logistics = get_logistics_order(ticket_id)
+    if not logistics or logistics.get("order_state") == "failed":
+        error_msg = (logistics or {}).get("error_message", "Unknown error during delivery booking")
+        return JSONResponse(
+            status_code=500,
+            content={"error": error_msg, "ticket_id": ticket_id},
+        )
+
+    return {
+        "ticket_id": ticket_id,
+        "status": "order_placed",
+        "customer_name": resolved_name,
+        "delivery": {
+            "prorouting_order_id": logistics.get("prorouting_order_id"),
+            "logistics_partner": logistics.get("selected_lsp_name"),
+            "delivery_price": logistics.get("quoted_price"),
+            "order_state": logistics.get("order_state"),
+            "pickup_address": logistics.get("pickup_address"),
+            "drop_address": logistics.get("drop_address"),
+        },
+        "message": f"Order confirmed! {logistics.get('selected_lsp_name') or 'Delivery partner'} will pick up from the store. Delivery cost: ₹{logistics.get('quoted_price') or 'N/A'}.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /api/ticket/{ticket_id}/delivery – delivery status & tracking
+# ---------------------------------------------------------------------------
+
+@router.get("/api/ticket/{ticket_id}/delivery")
+async def get_delivery_status(ticket_id: str):
+    """Get the logistics/delivery details for a ticket."""
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"error": "Ticket not found"})
+
+    logistics = get_logistics_order(ticket_id)
+    if not logistics:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=404,
+            content={"error": "No delivery order found for this ticket", "ticket_id": ticket_id},
+        )
+
+    response = {
+        "ticket_id": ticket_id,
+        "ticket_status": ticket["status"],
+        "delivery": {
+            "order_state": logistics.get("order_state"),
+            "prorouting_order_id": logistics.get("prorouting_order_id"),
+            "client_order_id": logistics.get("client_order_id"),
+            "logistics_partner": logistics.get("selected_lsp_name"),
+            "delivery_price": logistics.get("quoted_price"),
+            "pickup": {
+                "store_name": None,
+                "address": logistics.get("pickup_address"),
+                "phone": logistics.get("pickup_phone"),
+            },
+            "drop": {
+                "customer_name": logistics.get("customer_name"),
+                "address": logistics.get("drop_address"),
+                "phone": logistics.get("drop_phone"),
+            },
+            "rider": None,
+            "tracking_url": logistics.get("tracking_url"),
+            "error": logistics.get("error_message"),
+            "created_at": logistics.get("created_at"),
+            "updated_at": logistics.get("updated_at"),
+        },
+    }
+
+    if logistics.get("rider_name") or logistics.get("rider_phone"):
+        response["delivery"]["rider"] = {
+            "name": logistics.get("rider_name"),
+            "phone": logistics.get("rider_phone"),
+        }
+
+    return response
 
 
 # ---------------------------------------------------------------------------

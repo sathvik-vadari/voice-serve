@@ -23,6 +23,7 @@ RULES:
 - Do NOT use markdown formatting — this message will be sent as plain text (SMS/WhatsApp style)
 - Write in English
 - As part of the initial product request sent, you would've received information about the specs the user is looking for. If you are unable to derive any information regarding the specs then you have to mention that in your options. Ex: Found your Phone but they don't have it in Blue.
+- Do not have to mention what went on during calls if it does not make any difference to the product purchase. The user does not care if you had a trouble in talking to the vendor or not. So omit those kind of messages.
 
 Respond with ONLY a JSON object:
 {

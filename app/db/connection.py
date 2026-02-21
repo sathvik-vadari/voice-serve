@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     query TEXT NOT NULL,
     location TEXT NOT NULL,
     user_phone VARCHAR(50),
+    user_name VARCHAR(255),
     query_type VARCHAR(50),
     status VARCHAR(50) NOT NULL DEFAULT 'received',
     vapi_call_id VARCHAR(255),
@@ -104,6 +105,39 @@ CREATE TABLE IF NOT EXISTS store_calls (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS logistics_orders (
+    id SERIAL PRIMARY KEY,
+    ticket_id VARCHAR(255) NOT NULL REFERENCES tickets(ticket_id) ON DELETE CASCADE,
+    store_call_id INTEGER REFERENCES store_calls(id),
+    client_order_id VARCHAR(255) NOT NULL UNIQUE,
+    prorouting_order_id VARCHAR(255),
+    quote_id VARCHAR(255),
+    selected_lsp_id VARCHAR(500),
+    selected_lsp_name VARCHAR(500),
+    quoted_price DECIMAL(12,2),
+    pickup_lat DECIMAL(10,8),
+    pickup_lng DECIMAL(11,8),
+    pickup_address TEXT,
+    pickup_pincode VARCHAR(10),
+    pickup_phone VARCHAR(50),
+    drop_lat DECIMAL(10,8),
+    drop_lng DECIMAL(11,8),
+    drop_address TEXT,
+    drop_pincode VARCHAR(10),
+    drop_phone VARCHAR(50),
+    customer_name VARCHAR(255),
+    order_state VARCHAR(100) DEFAULT 'pending',
+    rider_name VARCHAR(255),
+    rider_phone VARCHAR(50),
+    tracking_url TEXT,
+    status_callbacks JSONB DEFAULT '[]'::jsonb,
+    order_amount DECIMAL(12,2),
+    order_weight DECIMAL(8,2) DEFAULT 1.0,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS llm_logs (
     id SERIAL PRIMARY KEY,
     ticket_id VARCHAR(255) REFERENCES tickets(ticket_id) ON DELETE SET NULL,
@@ -138,6 +172,9 @@ CREATE INDEX IF NOT EXISTS idx_store_calls_vapi_id ON store_calls(vapi_call_id);
 CREATE INDEX IF NOT EXISTS idx_store_calls_ticket ON store_calls(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_llm_logs_ticket ON llm_logs(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_tool_logs_ticket ON tool_call_logs(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_logistics_orders_ticket ON logistics_orders(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_logistics_orders_prorouting ON logistics_orders(prorouting_order_id);
+CREATE INDEX IF NOT EXISTS idx_logistics_orders_client ON logistics_orders(client_order_id);
 """
 
 _MIGRATION_SQL = """
@@ -145,6 +182,7 @@ DO $$ BEGIN
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS vapi_call_id VARCHAR(255);
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript TEXT;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tool_calls_made JSONB;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS user_name VARCHAR(255);
     ALTER TABLE store_calls ADD COLUMN IF NOT EXISTS transcript_json JSONB;
 EXCEPTION WHEN others THEN NULL;
 END $$;
