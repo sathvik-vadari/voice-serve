@@ -11,34 +11,34 @@ User submits query
         │
         ▼
 ┌──────────────┐
-│ Orchestrator  │  ← OpenAI: classify intent (order vs. wake-up)
+│ Orchestrator │  ← OpenAI: classify intent (order vs. wake-up)
 └──────┬───────┘
        │ order_product
        ▼
 ┌──────────────┐
-│ Query Analyzer│  ← Gemini: specific store vs. generic product?
+│Query Analyzer│  ← Gemini: specific store vs. generic product?
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│ Product       │  ← OpenAI: extract specs, alternatives, search terms
-│ Research      │
+│ Product      │  ← OpenAI: extract specs, alternatives, search terms
+│ Research     │
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│ Store Finder  │  ← Google Maps: multi-strategy search + dedup
+│ Store Finder │  ← Google Maps: multi-strategy search + dedup
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│ Store Ranker  │  ← Gemini: re-rank by relevance
+│ Store Ranker │  ← Gemini: re-rank by relevance
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│ Store Caller  │  ← VAPI: parallel outbound phone calls
+│ Store Caller │  ← VAPI: parallel outbound phone calls
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│ Transcript    │  ← OpenAI: structured extraction from call transcripts
-│ Analyzer      │
+│ Transcript   │  ← OpenAI: structured extraction from call transcripts
+│ Analyzer     │
 └──────┬───────┘
        ▼
   Final result: best match with price, delivery, and match score
@@ -96,7 +96,7 @@ app/
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/ticket` | Create a ticket — kicks off the full pipeline in the background |
-| `GET` | `/api/ticket/{ticket_id}` | Poll for status, progress, and results |
+| `GET`  | `/api/ticket/{ticket_id}` | Poll for status, progress, and results |
 
 **Create ticket payload:**
 
