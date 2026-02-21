@@ -336,13 +336,25 @@ def get_store_call_by_vapi_id(vapi_call_id: str) -> Optional[dict[str, Any]]:
     }
 
 
-def save_store_call_transcript(vapi_call_id: str, transcript: str) -> Optional[int]:
+def save_store_call_transcript(
+    vapi_call_id: str,
+    transcript: str,
+    transcript_messages: list[dict] | None = None,
+) -> Optional[int]:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """UPDATE store_calls SET transcript = %s, status = 'transcript_received', updated_at = NOW()
+                """UPDATE store_calls
+                   SET transcript = %s,
+                       transcript_json = %s,
+                       status = 'transcript_received',
+                       updated_at = NOW()
                    WHERE vapi_call_id = %s RETURNING id""",
-                (transcript, vapi_call_id),
+                (
+                    transcript,
+                    json.dumps(transcript_messages, default=str) if transcript_messages else None,
+                    vapi_call_id,
+                ),
             )
             row = cur.fetchone()
     return row[0] if row else None
@@ -406,7 +418,8 @@ def get_store_calls_for_ticket(ticket_id: str) -> list[dict[str, Any]]:
                           sc.product_available, sc.matched_product, sc.price,
                           sc.delivery_available, sc.delivery_eta, sc.delivery_mode,
                           sc.delivery_charge, sc.product_match_type, sc.notes,
-                          sc.call_analysis, ts.store_name, ts.phone_number, ts.rating
+                          sc.call_analysis, ts.store_name, ts.phone_number, ts.rating,
+                          ts.address, sc.transcript, sc.transcript_json
                    FROM store_calls sc
                    JOIN ticket_stores ts ON ts.id = sc.store_id
                    WHERE sc.ticket_id = %s ORDER BY ts.call_priority""",
@@ -424,6 +437,7 @@ def get_store_calls_for_ticket(ticket_id: str) -> list[dict[str, Any]]:
             "product_match_type": r[11], "notes": r[12],
             "call_analysis": r[13], "store_name": r[14],
             "phone_number": r[15], "rating": float(r[16]) if r[16] else None,
+            "address": r[17], "transcript": r[18], "transcript_json": r[19],
         }
         for r in rows
     ]

@@ -1,5 +1,6 @@
 """Store Caller – orchestrates outbound VAPI calls to stores for product inquiry."""
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from app.helpers.config import Config
@@ -45,7 +46,11 @@ def _build_store_prompt(
 
     product_name = product.get("product_name", "the requested product")
 
-    prompt = template.replace("{product_name}", product_name)
+    ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    current_datetime = ist_now.strftime("%A, %d %B %Y, %I:%M %p IST")
+
+    prompt = template.replace("{current_datetime}", current_datetime)
+    prompt = prompt.replace("{product_name}", product_name)
     prompt = prompt.replace("{product_specs}", specs_str)
     prompt = prompt.replace("{alternatives}", alts_str)
     prompt = prompt.replace("{location}", location)

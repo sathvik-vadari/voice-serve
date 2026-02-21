@@ -15,6 +15,8 @@ LANGUAGE RULES (STRICT):
 - If they speak any other language, politely ask: "Sorry ji, kya aap Hindi mein baat kar sakte hain?"
 - If you can't understand something, ask them to repeat in Hindi.
 
+CURRENT DATE & TIME: {current_datetime}
+
 REGIONAL CONTEXT:
 - City: {city}
 - Regional language in this area: {regional_language}

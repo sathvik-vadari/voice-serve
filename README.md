@@ -41,7 +41,12 @@ User submits query
 │ Analyzer     │
 └──────┬───────┘
        ▼
-  Final result: best match with price, delivery, and match score
+┌──────────────┐
+│ Options      │  ← OpenAI: generate user-facing summary from all
+│ Summary      │     successful calls + structured transcripts
+└──────┬───────┘
+       ▼
+  User message: ranked options with pricing, delivery, and transcript insights
 ```
 
 ## Tech Stack
@@ -83,6 +88,7 @@ app/
 │   ├── google_maps.py       # Place search + dedup
 │   ├── store_caller.py      # Outbound call orchestration
 │   ├── transcript_analyzer.py  # Post-call structured extraction
+│   ├── options_summary.py   # User-facing options message generator
 │   ├── vapi_client.py       # VAPI API wrapper
 │   └── wakeup_scheduler.py  # Background scheduler for wake-up calls
 └── scripts/
@@ -97,6 +103,31 @@ app/
 |--------|------|-------------|
 | `POST` | `/api/ticket` | Create a ticket — kicks off the full pipeline in the background |
 | `GET`  | `/api/ticket/{ticket_id}` | Poll for status, progress, and results |
+| `GET`  | `/api/ticket/{ticket_id}/options` | Get user-facing summary of all successful call options |
+
+**Options response** (hit after ticket is `completed`):
+
+```json
+{
+  "ticket_id": "TKT-001",
+  "product_requested": "2kg Prestige pressure cooker",
+  "options": [
+    {
+      "store_name": "Kumar Kitchen Store",
+      "address": "100ft Road, Indiranagar",
+      "phone_number": "+919812345678",
+      "matched_product": "Prestige Svachh 2L",
+      "price": 1499.0,
+      "delivery_available": true,
+      "delivery_eta": "same day",
+      "delivery_charge": 0,
+      "notes": "Only 3 left in stock"
+    }
+  ],
+  "message": "Hey! We called 4 stores for you...",
+  "quick_verdict": "Best deal: Kumar Kitchen Store has it for ₹1,499 with free same-day delivery"
+}
+```
 
 **Create ticket payload:**
 
@@ -168,7 +199,7 @@ Seven tables, auto-migrated on startup:
 | `tickets` | Top-level request tracking (query, status, result) |
 | `ticket_products` | Extracted product details & specs (JSONB) |
 | `ticket_stores` | Discovered stores with location & call priority |
-| `store_calls` | Per-store call records: transcript, analysis, pricing |
+| `store_calls` | Per-store call records: transcript (text + structured JSON), analysis, pricing |
 | `wakeup_users` | User preferences (daily wake-up time, do-not-call) |
 | `scheduled_calls` | Pending/completed wake-up calls |
 | `llm_logs` | Full LLM call audit trail (prompt, response, tokens, latency) |

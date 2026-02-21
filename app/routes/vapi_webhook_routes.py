@@ -251,14 +251,18 @@ async def vapi_store_webhook(request: Request) -> Response:
 
     # ---- end-of-call-report: trigger transcript analysis ----
     if msg_type == "end-of-call-report":
-        transcript = (msg.get("transcript") or msg.get("artifact", {}).get("transcript") or "").strip()
+        artifact = msg.get("artifact") or {}
+        transcript = (msg.get("transcript") or artifact.get("transcript") or "").strip()
+        transcript_messages = artifact.get("messages") or []
         ended_reason = msg.get("endedReason") or body.get("endedReason") or "(none)"
-        logger.info("Store call ended: vapi_call_id=%s reason=%s transcript_len=%d",
-                     vapi_call_id, ended_reason, len(transcript))
+        logger.info("Store call ended: vapi_call_id=%s reason=%s transcript_len=%d messages=%d",
+                     vapi_call_id, ended_reason, len(transcript), len(transcript_messages))
 
         if vapi_call_id:
-            if transcript:
-                asyncio.create_task(_handle_store_transcript(vapi_call_id, transcript, ended_reason))
+            if transcript or transcript_messages:
+                asyncio.create_task(_handle_store_transcript(
+                    vapi_call_id, transcript, ended_reason, transcript_messages,
+                ))
             else:
                 asyncio.create_task(_handle_store_no_transcript(vapi_call_id, ended_reason))
 
@@ -303,13 +307,18 @@ async def vapi_store_webhook(request: Request) -> Response:
     return Response(status_code=200, content=b"{}")
 
 
-async def _handle_store_transcript(vapi_call_id: str, transcript: str, ended_reason: str = "") -> None:
+async def _handle_store_transcript(
+    vapi_call_id: str,
+    transcript: str,
+    ended_reason: str = "",
+    transcript_messages: list[dict] | None = None,
+) -> None:
     """Background task: save transcript and run the transcript analyzer LLM."""
     try:
         from app.db.tickets import save_store_call_transcript, get_store_call_by_vapi_id
         from app.services.transcript_analyzer import analyze_transcript
 
-        call_id = save_store_call_transcript(vapi_call_id, transcript)
+        call_id = save_store_call_transcript(vapi_call_id, transcript, transcript_messages)
         if not call_id:
             logger.warning("No store_call found for vapi_call_id=%s", vapi_call_id)
             return

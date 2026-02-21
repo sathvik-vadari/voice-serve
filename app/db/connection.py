@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS store_calls (
     delivery_charge DECIMAL(12,2),
     product_match_type VARCHAR(50),
     notes TEXT,
+    transcript_json JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -144,6 +145,7 @@ DO $$ BEGIN
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS vapi_call_id VARCHAR(255);
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript TEXT;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tool_calls_made JSONB;
+    ALTER TABLE store_calls ADD COLUMN IF NOT EXISTS transcript_json JSONB;
 EXCEPTION WHEN others THEN NULL;
 END $$;
 

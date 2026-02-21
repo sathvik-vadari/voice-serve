@@ -22,6 +22,7 @@ from app.services.product_research import research_product
 from app.services.google_maps import find_stores
 from app.services.store_caller import call_stores
 from app.services.gemini_client import analyze_query, rerank_stores
+from app.services.options_summary import generate_options_summary
 
 logger = setup_logger(__name__)
 
@@ -141,6 +142,24 @@ async def get_ticket_status(ticket_id: str):
             }
 
     return response
+
+
+# ---------------------------------------------------------------------------
+# GET /api/ticket/{ticket_id}/options – user-facing summary of all options
+# ---------------------------------------------------------------------------
+
+@router.get("/api/ticket/{ticket_id}/options")
+async def get_ticket_options(ticket_id: str):
+    """
+    Once all calls are done, returns the successful options with a
+    generated user-facing message summarizing everything.
+    """
+    result = await generate_options_summary(ticket_id)
+    if "error" in result:
+        status_code = 404 if result["error"] == "Ticket not found" else 400
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=status_code, content=result)
+    return result
 
 
 # ---------------------------------------------------------------------------
