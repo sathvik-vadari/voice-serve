@@ -24,9 +24,9 @@ User submits query
 │ Research     │
 └──────┬───────┘
        ▼
-┌──────────────────────────────────────────────┐
-│           runs in parallel                   │
-│                                              │
+┌─────────────────────────────────────────────┐
+│           runs in parallel                  │
+│                                             │
 │  ┌──────────────┐      ┌──────────────┐     │
 │  │ Store Finder │      │  Web Deals   │     │
 │  │ Google Maps  │      │  Gemini +    │     │
@@ -49,10 +49,9 @@ User submits query
 │         │                     │             │
 └─────────┼─────────────────────┼─────────────┘
           ▼                     ▼
-┌──────────────────────────────────────┐
-│ Options Summary                      │  ← OpenAI: user-facing summary from
-│                                      │     store calls + web deals
-└──────────────┬───────────────────────┘
+┌─────────────────────────────────┐
+│          Options Summary        │  ← OpenAI: user-facing summary from store calls + web deals
+└──────────────┬──────────────────┘
                ▼
          User picks an option
                │
@@ -64,16 +63,16 @@ User submits query
 
 ## Tech Stack
 
-| Layer | Tech |
-|-------|------|
-| Backend | FastAPI + Uvicorn, Python 3.12+ |
-| Frontend | Next.js 16, React 19, TypeScript 5, Tailwind CSS 4, shadcn/ui |
-| LLMs | OpenAI GPT-4o, Google Gemini 2.0 Flash |
-| Voice / Telephony | VAPI (Deepgram transcription, Cartesia TTS) |
-| Store Discovery | Google Maps Places API |
-| Online Deals | Gemini with Google Search grounding |
-| Logistics | ProRouting (geocoding, quoting, delivery booking & tracking) |
-| Database | PostgreSQL |
+| Layer             | Tech                                                          |
+| ----------------- | ------------------------------------------------------------- |
+| Backend           | FastAPI + Uvicorn, Python 3.12+                               |
+| Frontend          | Next.js 16, React 19, TypeScript 5, Tailwind CSS 4, shadcn/ui |
+| LLMs              | OpenAI GPT-4o, Google Gemini 2.0 Flash                        |
+| Voice / Telephony | VAPI (Deepgram transcription, Cartesia TTS)                   |
+| Store Discovery   | Google Maps Places API                                        |
+| Online Deals      | Gemini with Google Search grounding                           |
+| Logistics         | ProRouting (geocoding, quoting, delivery booking & tracking)  |
+| Database          | PostgreSQL                                                    |
 
 ## Project Structure
 
@@ -133,13 +132,13 @@ frontend/
 
 ### Tickets
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/ticket` | Create a ticket — kicks off the full pipeline in the background |
-| `GET`  | `/api/ticket/{ticket_id}` | Poll for status, progress, and results |
-| `GET`  | `/api/ticket/{ticket_id}/options` | Get user-facing summary of all successful call options + web deals |
-| `POST` | `/api/ticket/{ticket_id}/confirm` | Confirm an option — triggers delivery booking via ProRouting |
-| `GET`  | `/api/ticket/{ticket_id}/delivery` | Get logistics/delivery status & tracking info |
+| Method | Path                               | Description                                                        |
+| ------ | ---------------------------------- | ------------------------------------------------------------------ |
+| `POST` | `/api/ticket`                      | Create a ticket — kicks off the full pipeline in the background    |
+| `GET`  | `/api/ticket/{ticket_id}`          | Poll for status, progress, and results                             |
+| `GET`  | `/api/ticket/{ticket_id}/options`  | Get user-facing summary of all successful call options + web deals |
+| `POST` | `/api/ticket/{ticket_id}/confirm`  | Confirm an option — triggers delivery booking via ProRouting       |
+| `GET`  | `/api/ticket/{ticket_id}/delivery` | Get logistics/delivery status & tracking info                      |
 
 **Create ticket payload:**
 
@@ -190,23 +189,23 @@ frontend/
 
 ### Logistics
 
-| Method | Path | Description |
-|--------|------|-------------|
+| Method | Path                      | Description                                                              |
+| ------ | ------------------------- | ------------------------------------------------------------------------ |
 | `POST` | `/api/logistics/callback` | ProRouting status callbacks (agent assigned, picked up, delivered, etc.) |
 
 ### VAPI Webhooks
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/vapi/webhook` | Wake-up call events |
+| Method | Path                      | Description               |
+| ------ | ------------------------- | ------------------------- |
+| `POST` | `/api/vapi/webhook`       | Wake-up call events       |
 | `POST` | `/api/vapi/store-webhook` | Store inquiry call events |
 
 ### Health
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | Service info |
-| `GET` | `/health` | Health check |
+| Method | Path      | Description  |
+| ------ | --------- | ------------ |
+| `GET`  | `/`       | Service info |
+| `GET`  | `/health` | Health check |
 
 ## Setup
 
@@ -235,7 +234,7 @@ pip install -e .
 
 ```bash
 cd frontend
-npm install
+bun install
 ```
 
 ### Configure
@@ -269,7 +268,7 @@ The server starts on `http://0.0.0.0:8000` by default. The database schema is au
 
 ```bash
 cd frontend
-npm run dev
+bun run dev
 ```
 
 Opens on `http://localhost:3000`.
@@ -278,18 +277,18 @@ Opens on `http://localhost:3000`.
 
 Ten tables, auto-migrated on startup:
 
-| Table | Purpose |
-|-------|---------|
-| `tickets` | Top-level request tracking (query, status, result) |
-| `ticket_products` | Extracted product details & specs (JSONB) |
-| `ticket_stores` | Discovered stores with location & call priority |
-| `store_calls` | Per-store call records: transcript (text + structured JSON), analysis, pricing |
-| `web_deals` | Online deal results from Gemini-powered web search |
-| `logistics_orders` | Delivery orders: pickup/drop addresses, LSP selection, rider tracking |
-| `wakeup_users` | User preferences (daily wake-up time, do-not-call) |
-| `scheduled_calls` | Pending/completed wake-up calls |
-| `llm_logs` | Full LLM call audit trail (prompt, response, tokens, latency) |
-| `tool_call_logs` | VAPI tool execution audit trail (input, output, status, latency) |
+| Table              | Purpose                                                                        |
+| ------------------ | ------------------------------------------------------------------------------ |
+| `tickets`          | Top-level request tracking (query, status, result)                             |
+| `ticket_products`  | Extracted product details & specs (JSONB)                                      |
+| `ticket_stores`    | Discovered stores with location & call priority                                |
+| `store_calls`      | Per-store call records: transcript (text + structured JSON), analysis, pricing |
+| `web_deals`        | Online deal results from Gemini-powered web search                             |
+| `logistics_orders` | Delivery orders: pickup/drop addresses, LSP selection, rider tracking          |
+| `wakeup_users`     | User preferences (daily wake-up time, do-not-call)                             |
+| `scheduled_calls`  | Pending/completed wake-up calls                                                |
+| `llm_logs`         | Full LLM call audit trail (prompt, response, tokens, latency)                  |
+| `tool_call_logs`   | VAPI tool execution audit trail (input, output, status, latency)               |
 
 ## Regional Support
 
@@ -299,7 +298,6 @@ voice-serve speaks the customer's language. Regional config auto-detects city fr
 - **Voice** — TTS language matching the region
 - **Greeting style** — culturally appropriate openers
 - **Communication style** — adapted per region
-
 
 ## License
 
