@@ -518,17 +518,17 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
                 </span>
               )}
             </div>
-            {bestOption.matched_product && (
+            {Boolean(bestOption.matched_product) && (
               <p className="text-xs text-muted-foreground">{String(bestOption.matched_product)}</p>
             )}
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {bestOption.product_match_type && (
+              {Boolean(bestOption.product_match_type) && (
                 <Badge variant="outline" className="text-[10px]">
                   {String(bestOption.product_match_type)}
                 </Badge>
               )}
               {bestOption.rating != null && <span>★ {String(bestOption.rating)}</span>}
-              {bestOption.phone_number && (
+              {Boolean(bestOption.phone_number) && (
                 <span className="flex items-center gap-1">
                   <Phone className="h-3 w-3" />
                   {String(bestOption.phone_number)}
@@ -540,7 +540,7 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
                 </span>
               )}
             </div>
-            {bestOption.call_summary && (
+            {Boolean(bestOption.call_summary) && (
               <p className="text-xs text-muted-foreground italic">
                 &quot;{String(bestOption.call_summary)}&quot;
               </p>
@@ -568,10 +568,10 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
                     </span>
                   )}
                 </div>
-                {opt.matched_product && (
+                {Boolean(opt.matched_product) && (
                   <p className="text-muted-foreground">{String(opt.matched_product)}</p>
                 )}
-                {opt.call_summary && (
+                {Boolean(opt.call_summary) && (
                   <p className="text-muted-foreground italic">&quot;{String(opt.call_summary)}&quot;</p>
                 )}
               </div>
@@ -619,7 +619,7 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
                     </span>
                   )}
                 </div>
-                {bestDeal.reason && (
+                {Boolean(bestDeal.reason) && (
                   <p className="text-muted-foreground leading-relaxed">{String(bestDeal.reason)}</p>
                 )}
               </div>
@@ -658,16 +658,16 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
                         )}
                       </div>
                     </div>
-                    {d.product_title && (
+                    {Boolean(d.product_title) && (
                       <p className="text-muted-foreground">{String(d.product_title)}</p>
                     )}
-                    {d.delivery_estimate && (
+                    {Boolean(d.delivery_estimate) && (
                       <div className="flex items-center gap-1 text-muted-foreground">
                         <Zap className="h-2.5 w-2.5 text-yellow-400" />
                         <span>Delivery: {String(d.delivery_estimate)}</span>
                       </div>
                     )}
-                    {d.confidence && (
+                    {Boolean(d.confidence) && (
                       <div>
                         <span
                           className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
@@ -686,13 +686,13 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
                         </span>
                       </div>
                     )}
-                    {d.offer_details && (
+                    {Boolean(d.offer_details) && (
                       <div className="flex items-start gap-1 text-orange-400/80">
                         <Tag className="h-2.5 w-2.5 shrink-0 mt-0.5" />
                         <span>{String(d.offer_details)}</span>
                       </div>
                     )}
-                    {d.url && (
+                    {Boolean(d.url) && (
                       <a
                         href={String(d.url)}
                         target="_blank"
