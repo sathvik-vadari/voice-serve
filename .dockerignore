@@ -1,0 +1,12 @@
+frontend/
+.venv/
+.env
+logs/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+README.md
+test_call.py
+metrics.py
+node_modules/

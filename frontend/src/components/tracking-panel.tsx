@@ -28,6 +28,11 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  Globe,
+  Tag,
+  Zap,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -253,16 +258,7 @@ export function TrackingPanel() {
 
             {/* Final result */}
             {ticket.result && (
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Result</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm">
-                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">
-                    {JSON.stringify(ticket.result, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
+              <ResultCard result={ticket.result} />
             )}
           </div>
         </ScrollArea>
@@ -429,6 +425,311 @@ function DeliveryDetails({
           Live Tracking
         </a>
       ) : null}
+    </div>
+  );
+}
+
+// ── Result Card ──────────────────────────────────────────────────────────
+
+function ResultCard({ result }: { result: Record<string, unknown> }) {
+  const [showRawJson, setShowRawJson] = useState(false);
+
+  const r = result as Record<string, unknown>;
+  const status = r.status as string | undefined;
+  const recommendation = r.recommendation as string | undefined;
+  const productRequested = r.product_requested as string | undefined;
+  const storesContacted = r.stores_contacted as number | undefined;
+  const callsConnected = r.calls_connected as number | undefined;
+  const callsFailed = r.calls_failed as number | undefined;
+  const storesWithProduct = r.stores_with_product as number | undefined;
+
+  const bestOption = r.best_option as Record<string, unknown> | undefined;
+  const allOptions = r.all_options as Record<string, unknown>[] | undefined;
+
+  const webDeals = r.web_deals as Record<string, unknown> | undefined;
+  const deals = webDeals?.deals as Record<string, unknown>[] | undefined;
+  const bestDeal = webDeals?.best_deal as Record<string, unknown> | undefined;
+  const searchSummary = webDeals?.search_summary as string | undefined;
+  const priceRange = webDeals?.price_range as Record<string, number> | undefined;
+
+  const strippedResult = { ...r };
+  delete strippedResult.web_deals;
+  delete strippedResult.all_options;
+  delete strippedResult.best_option;
+  const hasRawData = Object.keys(strippedResult).length > 5;
+
+  return (
+    <div className="space-y-3">
+      {/* Summary card */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm">Result</CardTitle>
+            {status && (
+              <Badge
+                className={
+                  status === "found"
+                    ? "bg-green-500/20 text-green-400"
+                    : "bg-yellow-500/20 text-yellow-400"
+                }
+              >
+                {status}
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          {productRequested && (
+            <p className="text-muted-foreground">
+              Product: <span className="text-foreground font-medium">{productRequested}</span>
+            </p>
+          )}
+
+          {recommendation && (
+            <div className="bg-primary/5 border border-primary/10 rounded-lg p-3 text-xs leading-relaxed">
+              {recommendation}
+            </div>
+          )}
+
+          <div className="grid grid-cols-4 gap-2 text-center">
+            {storesContacted != null && <Stat label="Stores" value={storesContacted} />}
+            {callsConnected != null && <Stat label="Connected" value={callsConnected} />}
+            {callsFailed != null && <Stat label="Failed" value={callsFailed} />}
+            {storesWithProduct != null && <Stat label="Had Product" value={storesWithProduct} />}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Best store option */}
+      {bestOption && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <Store className="h-4 w-4 text-green-400" />
+              <CardTitle className="text-sm">Best Store Option</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="font-medium">{String(bestOption.store_name || "Unknown")}</span>
+              {bestOption.price != null && (
+                <span className="text-base font-bold text-green-400">
+                  ₹{Number(bestOption.price).toLocaleString("en-IN")}
+                </span>
+              )}
+            </div>
+            {bestOption.matched_product && (
+              <p className="text-xs text-muted-foreground">{String(bestOption.matched_product)}</p>
+            )}
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              {bestOption.product_match_type && (
+                <Badge variant="outline" className="text-[10px]">
+                  {String(bestOption.product_match_type)}
+                </Badge>
+              )}
+              {bestOption.rating != null && <span>★ {String(bestOption.rating)}</span>}
+              {bestOption.phone_number && (
+                <span className="flex items-center gap-1">
+                  <Phone className="h-3 w-3" />
+                  {String(bestOption.phone_number)}
+                </span>
+              )}
+              {bestOption.delivery_available != null && (
+                <span>
+                  Delivery: {bestOption.delivery_available ? "Yes" : "No"}
+                </span>
+              )}
+            </div>
+            {bestOption.call_summary && (
+              <p className="text-xs text-muted-foreground italic">
+                &quot;{String(bestOption.call_summary)}&quot;
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Other options */}
+      {allOptions && allOptions.length > 1 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">All Store Options ({allOptions.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {allOptions.map((opt, i) => (
+              <div key={i} className="rounded-lg border p-2.5 text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-sm">
+                    {opt.rank ? `#${opt.rank} ` : ""}{String(opt.store_name || "Store")}
+                  </span>
+                  {opt.price != null && (
+                    <span className="font-bold text-green-400">
+                      ₹{Number(opt.price).toLocaleString("en-IN")}
+                    </span>
+                  )}
+                </div>
+                {opt.matched_product && (
+                  <p className="text-muted-foreground">{String(opt.matched_product)}</p>
+                )}
+                {opt.call_summary && (
+                  <p className="text-muted-foreground italic">&quot;{String(opt.call_summary)}&quot;</p>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Web deals */}
+      {deals && deals.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-blue-400" />
+              <CardTitle className="text-sm">Web Deals ({deals.length})</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {searchSummary && (
+              <p className="text-xs text-muted-foreground leading-relaxed">{searchSummary}</p>
+            )}
+
+            {priceRange && (
+              <div className="flex gap-4 text-xs text-muted-foreground">
+                {priceRange.lowest != null && (
+                  <span>Low: <span className="text-green-400 font-medium">₹{priceRange.lowest.toLocaleString("en-IN")}</span></span>
+                )}
+                {priceRange.avg != null && (
+                  <span>Avg: ₹{Math.round(priceRange.avg).toLocaleString("en-IN")}</span>
+                )}
+                {priceRange.highest != null && (
+                  <span>High: ₹{priceRange.highest.toLocaleString("en-IN")}</span>
+                )}
+              </div>
+            )}
+
+            {bestDeal && (
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-2.5 text-xs">
+                <div className="flex items-center gap-1.5 font-medium text-blue-400 mb-1">
+                  <Zap className="h-3 w-3" />
+                  Best Deal: {String(bestDeal.platform)}
+                  {bestDeal.price != null && (
+                    <span className="ml-auto font-bold text-green-400">
+                      ₹{Number(bestDeal.price).toLocaleString("en-IN")}
+                    </span>
+                  )}
+                </div>
+                {bestDeal.reason && (
+                  <p className="text-muted-foreground leading-relaxed">{String(bestDeal.reason)}</p>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {deals.map((deal, i) => {
+                const d = deal as Record<string, unknown>;
+                return (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-blue-500/20 p-2.5 text-xs space-y-1"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] border-blue-400/30 text-blue-400"
+                      >
+                        {String(d.platform)}
+                      </Badge>
+                      <div className="flex items-center gap-2">
+                        {d.original_price != null && d.original_price !== d.price && (
+                          <span className="text-muted-foreground line-through">
+                            ₹{Number(d.original_price).toLocaleString("en-IN")}
+                          </span>
+                        )}
+                        {d.price != null && (
+                          <span className="font-bold text-green-400">
+                            ₹{Number(d.price).toLocaleString("en-IN")}
+                          </span>
+                        )}
+                        {d.discount_percent != null && Number(d.discount_percent) > 0 && (
+                          <span className="text-[9px] font-semibold text-orange-400 bg-orange-500/15 px-1 py-px rounded">
+                            -{String(d.discount_percent)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {d.product_title && (
+                      <p className="text-muted-foreground">{String(d.product_title)}</p>
+                    )}
+                    {d.delivery_estimate && (
+                      <div className="flex items-center gap-1 text-muted-foreground">
+                        <Zap className="h-2.5 w-2.5 text-yellow-400" />
+                        <span>Delivery: {String(d.delivery_estimate)}</span>
+                      </div>
+                    )}
+                    {d.confidence && (
+                      <div>
+                        <span
+                          className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                            d.confidence === "high"
+                              ? "bg-green-500/15 text-green-400"
+                              : d.confidence === "medium"
+                                ? "bg-yellow-500/15 text-yellow-400"
+                                : "bg-muted text-muted-foreground/70"
+                          }`}
+                        >
+                          {d.confidence === "high"
+                            ? "High confidence match"
+                            : d.confidence === "medium"
+                              ? "Medium confidence"
+                              : "Low confidence — verify before buying"}
+                        </span>
+                      </div>
+                    )}
+                    {d.offer_details && (
+                      <div className="flex items-start gap-1 text-orange-400/80">
+                        <Tag className="h-2.5 w-2.5 shrink-0 mt-0.5" />
+                        <span>{String(d.offer_details)}</span>
+                      </div>
+                    )}
+                    {d.url && (
+                      <a
+                        href={String(d.url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-blue-400 hover:underline"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        View on {String(d.platform)}
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Raw JSON toggle (for debugging) */}
+      {hasRawData && (
+        <button
+          onClick={() => setShowRawJson(!showRawJson)}
+          className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors mx-auto"
+        >
+          {showRawJson ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          {showRawJson ? "Hide" : "Show"} raw data
+        </button>
+      )}
+      {showRawJson && (
+        <Card>
+          <CardContent className="p-3">
+            <pre className="text-[10px] bg-muted p-3 rounded-lg overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto">
+              {JSON.stringify(strippedResult, null, 2)}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

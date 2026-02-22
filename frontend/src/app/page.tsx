@@ -8,14 +8,9 @@ import { Package, Search } from "lucide-react";
 export default function Home() {
   return (
     <main className="min-h-screen bg-background">
-      <div className="mx-auto max-w-3xl px-4 py-6">
-        <header className="mb-6 text-center">
-          <h1 className="text-2xl font-bold tracking-tight">
-            Voice Commerce
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Tell us what you need — we call stores and get it delivered
-          </p>
+      <div className="mx-auto max-w-3xl px-4 py-4">
+        <header className="mb-4 text-center">
+          <h1 className="text-xl font-bold tracking-tight">Voice Commerce</h1>
         </header>
 
         <Tabs defaultValue="query" className="w-full">

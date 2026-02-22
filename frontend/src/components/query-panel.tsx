@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -40,6 +39,7 @@ import {
   Zap,
   ChevronLeft,
   ChevronRight,
+  Pencil,
 } from "lucide-react";
 
 type ChatMessage = {
@@ -103,11 +103,13 @@ export function QueryPanel() {
   const [query, setQuery] = useState("");
   const [maxStores, setMaxStores] = useState(4);
 
+  const [showDetails, setShowDetails] = useState(true);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [options, setOptions] = useState<OptionsResponse | null>(null);
   const [selectedOption, setSelectedOption] = useState<OptionItem | null>(null);
 
-  // Pipeline tracker state (updated in-place, not as chat messages)
   const [pipelineStatus, setPipelineStatus] = useState<string>("");
   const [callProgress, setCallProgress] = useState<{
     completed: number;
@@ -118,6 +120,27 @@ export function QueryPanel() {
   const lastStatusRef = useRef("");
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Load profile from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("vc_profile");
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (p.name) setName(p.name);
+        if (p.phone) setPhone(p.phone);
+        if (p.address) setAddress(p.address);
+        if (p.phone && p.address) setShowDetails(false);
+      }
+    } catch {}
+    setProfileLoaded(true);
+  }, []);
+
+  // Persist profile to localStorage on change
+  useEffect(() => {
+    if (!profileLoaded) return;
+    localStorage.setItem("vc_profile", JSON.stringify({ name, phone, address }));
+  }, [name, phone, address, profileLoaded]);
 
   const addMsg = useCallback(
     (
@@ -388,16 +411,133 @@ export function QueryPanel() {
 
   // ── Render ─────────────────────────────────────────────────────────────
 
+  const isHeroView = messages.length === 0 && phase === "input";
+
+  // ── Hero view: centered search-first layout ──────────────────────────
+  if (isHeroView) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center px-2"
+        style={{ minHeight: "calc(100vh - 220px)" }}
+      >
+        <div className="w-full max-w-lg space-y-5">
+          <Textarea
+            id="query"
+            placeholder="What do you need? e.g. iPhone 15 128GB black, 2 butter naans..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            rows={3}
+            className="text-base resize-none"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+          />
+
+          {/* Profile details — collapsible */}
+          {!showDetails && phone.trim() && address.trim() ? (
+            <button
+              onClick={() => setShowDetails(true)}
+              className="w-full flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-2 rounded-lg hover:bg-muted/50"
+            >
+              <Phone className="h-3 w-3 shrink-0" />
+              <span className="truncate">{phone}</span>
+              <span className="text-muted-foreground/40">·</span>
+              <MapPin className="h-3 w-3 shrink-0" />
+              <span className="truncate flex-1 text-left">{address}</span>
+              <Pencil className="h-3 w-3 shrink-0 ml-auto opacity-50" />
+            </button>
+          ) : (
+            <div className="space-y-2.5 rounded-xl border border-border/50 p-3.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Your details
+                </span>
+                {phone.trim() && address.trim() && (
+                  <button
+                    onClick={() => setShowDetails(false)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Done
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  placeholder="Name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="h-9 text-sm"
+                />
+                <Input
+                  placeholder="Phone *"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="h-9 text-sm"
+                />
+              </div>
+              <Input
+                placeholder="Delivery address with area & city *"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+          )}
+
+          {/* Stores stepper — compact inline */}
+          <div className="flex items-center justify-center gap-3">
+            <span className="text-xs text-muted-foreground">
+              Stores to call
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => setMaxStores((v) => Math.max(1, v - 1))}
+                disabled={maxStores <= 1}
+              >
+                <Minus className="h-3 w-3" />
+              </Button>
+              <span className="w-6 text-center text-sm font-medium tabular-nums">
+                {maxStores}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={() => setMaxStores((v) => Math.min(10, v + 1))}
+                disabled={maxStores >= 10}
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+
+          <Button
+            className="w-full"
+            onClick={handleSubmit}
+            disabled={!phone.trim() || !address.trim() || !query.trim()}
+          >
+            <Send className="mr-2 h-4 w-4" />
+            Search
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Chat view: messages + bottom action bar ──────────────────────────
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 200px)" }}>
       <ScrollArea className="flex-1 pr-2">
         <div className="space-y-3 pb-4">
-          {messages.length === 0 && phase === "input" && (
-            <div className="py-12 text-center text-muted-foreground text-sm">
-              Fill in your details below and tell us what you need!
-            </div>
-          )}
-
           {messages.map((msg) => (
             <MessageBubble
               key={msg.id}
@@ -408,7 +548,6 @@ export function QueryPanel() {
             />
           ))}
 
-          {/* Live pipeline tracker — replaces spammy status messages */}
           {phase === "polling" && pipelineStatus && (
             <PipelineTracker
               currentStatus={pipelineStatus}
@@ -423,146 +562,150 @@ export function QueryPanel() {
 
       <Separator className="my-3" />
 
-      {/* Input area */}
-      {(phase === "input" || phase === "retry_input") && (
-        <div className="space-y-3 pb-6">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label
-                htmlFor="name"
-                className="text-xs text-muted-foreground mb-1"
-              >
-                Name
-              </Label>
+      {/* New query input (after "New Query" action) */}
+      {phase === "input" && (
+        <div className="space-y-3 pb-4">
+          <Textarea
+            id="query"
+            placeholder="Describe what you need..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            rows={2}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              className="flex-1"
+              onClick={handleSubmit}
+              disabled={!phone.trim() || !address.trim() || !query.trim()}
+            >
+              <Send className="mr-2 h-4 w-4" />
+              Send Query
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setShowDetails((v) => !v)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          {showDetails && (
+            <div className="space-y-2 rounded-xl border border-border/50 p-3">
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  placeholder="Name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="h-9 text-sm"
+                />
+                <Input
+                  placeholder="Phone *"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="h-9 text-sm"
+                />
+              </div>
               <Input
-                id="name"
-                placeholder="Your name"
+                placeholder="Delivery address *"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Retry input — edit details and re-submit */}
+      {phase === "retry_input" && (
+        <div className="space-y-3 pb-4">
+          <div className="space-y-2.5 rounded-xl border border-border/50 p-3.5">
+            <span className="text-xs font-medium text-muted-foreground">
+              Update your details
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                placeholder="Name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                className="h-9 text-sm"
               />
-            </div>
-            <div>
-              <Label
-                htmlFor="phone"
-                className="text-xs text-muted-foreground mb-1"
-              >
-                Phone *
-              </Label>
               <Input
-                id="phone"
-                placeholder="+91..."
+                placeholder="Phone *"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                className="h-9 text-sm"
               />
             </div>
-          </div>
-
-          <div>
-            <Label
-              htmlFor="address"
-              className="text-xs text-muted-foreground mb-1"
-            >
-              Delivery Address *
-            </Label>
             <Input
-              id="address"
-              placeholder="Full address with area & city"
+              placeholder="Delivery address *"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
+              className="h-9 text-sm"
             />
           </div>
-
-          <div className="flex flex-col items-center gap-1">
-            <Label className="text-xs text-muted-foreground">
-              Stores to call
-            </Label>
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center gap-3">
+            <span className="text-xs text-muted-foreground">Stores</span>
+            <div className="flex items-center gap-2">
               <Button
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-8 w-8 shrink-0"
+                className="h-7 w-7"
                 onClick={() => setMaxStores((v) => Math.max(1, v - 1))}
                 disabled={maxStores <= 1}
               >
-                <Minus className="h-3.5 w-3.5" />
+                <Minus className="h-3 w-3" />
               </Button>
-              <span className="w-8 text-center text-sm font-medium tabular-nums">
+              <span className="w-6 text-center text-sm font-medium tabular-nums">
                 {maxStores}
               </span>
               <Button
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-8 w-8 shrink-0"
+                className="h-7 w-7"
                 onClick={() => setMaxStores((v) => Math.min(10, v + 1))}
                 disabled={maxStores >= 10}
               >
-                <Plus className="h-3.5 w-3.5" />
+                <Plus className="h-3 w-3" />
               </Button>
             </div>
-            <span className="text-[11px] text-muted-foreground">
-              More stores = wider reach but takes longer
-            </span>
           </div>
-
-          {phase === "input" && (
-            <div>
-              <Label
-                htmlFor="query"
-                className="text-xs text-muted-foreground mb-1"
-              >
-                What do you need? *
-              </Label>
-              <Textarea
-                id="query"
-                placeholder="e.g. iPhone 15 128GB black, or 2 butter naans from a nearby restaurant"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                rows={2}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmit();
-                  }
-                }}
-              />
-            </div>
-          )}
-
           <Button
             className="w-full"
-            onClick={phase === "retry_input" ? handleRetrySubmit : handleSubmit}
-            disabled={
-              !phone.trim() ||
-              !address.trim() ||
-              (phase === "input" && !query.trim())
-            }
+            onClick={handleRetrySubmit}
+            disabled={!phone.trim() || !address.trim()}
           >
-            <Send className="mr-2 h-4 w-4 pb-6" />
-            {phase === "retry_input"
-              ? "Retry with Updated Details"
-              : "Send Query"}
+            <Send className="mr-2 h-4 w-4" />
+            Retry with Updated Details
           </Button>
         </div>
       )}
 
       {phase === "polling" && !pipelineStatus && (
-        <div className="flex items-center justify-center gap-2 py-4 pb-8 text-muted-foreground">
+        <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span className="text-sm">Connecting...</span>
         </div>
       )}
 
       {phase === "confirming" && (
-        <div className="flex items-center justify-center gap-2 py-4 pb-8 text-muted-foreground">
+        <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span className="text-sm">Placing your delivery order...</span>
         </div>
       )}
 
       {phase === "rejected" && (
-        <div className="flex gap-3 pb-6">
+        <div className="flex gap-3 pb-4">
           <Button variant="outline" className="flex-1" onClick={handleTryAgain}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Try Again
@@ -575,7 +718,7 @@ export function QueryPanel() {
       )}
 
       {phase === "done" && (
-        <div className="text-center pb-6">
+        <div className="text-center pb-4">
           <Button variant="outline" onClick={handleReset}>
             Start New Query
           </Button>
@@ -1034,77 +1177,98 @@ function WebDealsCarousel({ deals }: { deals: WebDeal[] }) {
 
 function WebDealSlide({ deal }: { deal: WebDeal }) {
   return (
-    <div className="rounded-lg border border-blue-500/20 bg-background/50 px-2.5 py-2 space-y-1">
-      {/* Row 1: platform + price */}
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold truncate">{deal.platform}</span>
-        <div className="flex items-center gap-1.5 shrink-0">
+    <div className="rounded-xl border border-blue-500/20 bg-background/60 px-4 py-3.5 space-y-2.5">
+      {/* Row 1: platform badge + price */}
+      <div className="flex items-center justify-between gap-3">
+        <Badge
+          variant="outline"
+          className="text-[11px] px-2 py-0.5 border-blue-400/30 text-blue-400 font-semibold"
+        >
+          {deal.platform}
+        </Badge>
+        <div className="flex items-center gap-2 shrink-0">
+          {deal.original_price != null &&
+            deal.original_price !== deal.price && (
+              <span className="text-xs text-muted-foreground line-through">
+                ₹{deal.original_price.toLocaleString("en-IN")}
+              </span>
+            )}
           {deal.price != null && (
-            <span className="text-sm font-bold text-green-400">
+            <span className="text-base font-bold text-green-400">
               ₹{deal.price.toLocaleString("en-IN")}
             </span>
           )}
           {deal.discount_percent != null && deal.discount_percent > 0 && (
-            <span className="text-[9px] font-medium text-orange-400 bg-orange-500/15 px-1 py-px rounded">
+            <span className="text-[10px] font-semibold text-orange-400 bg-orange-500/15 px-1.5 py-0.5 rounded">
               -{deal.discount_percent}%
             </span>
-          )}
-          {deal.url && (
-            <a
-              href={deal.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-400 hover:text-blue-300"
-            >
-              <ExternalLink className="h-3 w-3" />
-            </a>
           )}
         </div>
       </div>
 
-      {/* Row 2: product title (1 line) */}
+      {/* Row 2: product title — full text */}
       {deal.product_title && (
-        <p className="text-[11px] text-muted-foreground truncate">
+        <p className="text-sm leading-snug text-foreground/90">
           {deal.product_title}
         </p>
       )}
 
-      {/* Row 3: meta chips */}
-      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-        {deal.original_price != null && deal.original_price !== deal.price && (
-          <span className="line-through">
-            ₹{deal.original_price.toLocaleString("en-IN")}
-          </span>
-        )}
-        {deal.delivery_estimate && (
-          <span className="flex items-center gap-0.5">
-            <Zap className="h-2.5 w-2.5 text-yellow-400" />
-            {deal.delivery_estimate}
-          </span>
-        )}
-        {deal.confidence && (
-          <span
-            className={
-              deal.confidence === "high"
-                ? "text-green-400"
-                : "text-muted-foreground/60"
-            }
-          >
-            {deal.confidence}
-          </span>
-        )}
-      </div>
+      {/* Row 3: delivery estimate */}
+      {deal.delivery_estimate && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Zap className="h-3 w-3 text-yellow-400" />
+          <span>Delivery: {deal.delivery_estimate}</span>
+        </div>
+      )}
 
-      {/* Row 4: offer or notable (pick one — keep it tight) */}
-      {deal.offer_details ? (
-        <p className="text-[10px] text-orange-400/80 truncate">
-          {deal.offer_details}
-        </p>
-      ) : deal.why_notable ? (
-        <p className="text-[10px] text-blue-300/60 italic truncate">
+      {/* Row 4: confidence — separate labeled bubble */}
+      {deal.confidence && (
+        <div className="flex items-center">
+          <span
+            className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+              deal.confidence === "high"
+                ? "bg-green-500/15 text-green-400"
+                : deal.confidence === "medium"
+                  ? "bg-yellow-500/15 text-yellow-400"
+                  : "bg-muted text-muted-foreground/70"
+            }`}
+          >
+            {deal.confidence === "high"
+              ? "High confidence match"
+              : deal.confidence === "medium"
+                ? "Medium confidence"
+                : "Low confidence — verify before buying"}
+          </span>
+        </div>
+      )}
+
+      {/* Row 5: offer details — fully visible */}
+      {deal.offer_details && (
+        <div className="flex items-start gap-1.5 text-xs text-orange-400/90 bg-orange-500/10 rounded-md px-2.5 py-1.5">
+          <Tag className="h-3 w-3 shrink-0 mt-0.5" />
+          <span className="leading-relaxed">{deal.offer_details}</span>
+        </div>
+      )}
+
+      {/* Row 6: why notable — fully visible */}
+      {deal.why_notable && (
+        <p className="text-xs text-blue-300/70 italic leading-relaxed">
           {deal.why_notable}
         </p>
-      ) : null}
+      )}
+
+      {/* Row 7: visit link */}
+      {deal.url && (
+        <a
+          href={deal.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-center gap-2 w-full mt-0.5 py-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 hover:text-blue-300 text-xs font-medium transition-colors"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          View on {deal.platform}
+        </a>
+      )}
     </div>
   );
 }
