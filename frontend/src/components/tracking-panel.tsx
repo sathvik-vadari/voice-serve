@@ -107,7 +107,7 @@ export function TrackingPanel() {
   const isTerminal = ticket && terminalStatuses.includes(ticket.status);
 
   return (
-    <div className="space-y-4" style={{ minHeight: "calc(100vh - 200px)" }}>
+    <div className="space-y-3 sm:space-y-4" style={{ minHeight: "calc(100dvh - 170px)" }}>
       {/* Search bar */}
       <div className="flex gap-2">
         <div className="flex-1">
@@ -122,10 +122,16 @@ export function TrackingPanel() {
             onKeyDown={(e) => {
               if (e.key === "Enter") handleSearch();
             }}
+            className="h-11 sm:h-9"
           />
         </div>
-        <div className="flex items-end gap-2">
-          <Button onClick={handleSearch} disabled={loading || !ticketId.trim()}>
+        <div className="flex items-end gap-1.5 sm:gap-2">
+          <Button
+            onClick={handleSearch}
+            disabled={loading || !ticketId.trim()}
+            className="h-11 w-11 sm:h-9 sm:w-9"
+            size="icon"
+          >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
@@ -137,6 +143,8 @@ export function TrackingPanel() {
             onClick={() => setAutoRefresh(!autoRefresh)}
             disabled={!ticketId.trim()}
             title="Auto-refresh every 5s"
+            className="h-11 w-11 sm:h-9 sm:w-9"
+            size="icon"
           >
             <RefreshCw className={`h-4 w-4 ${autoRefresh ? "animate-spin" : ""}`} />
           </Button>
@@ -153,8 +161,8 @@ export function TrackingPanel() {
       )}
 
       {ticket && (
-        <ScrollArea className="h-[calc(100vh-320px)]">
-          <div className="space-y-4 pr-2">
+        <ScrollArea className="h-[calc(100dvh-280px)]">
+          <div className="space-y-3 sm:space-y-4 pr-1 sm:pr-2">
             {/* Status overview */}
             <Card>
               <CardHeader className="pb-2">
@@ -198,7 +206,7 @@ export function TrackingPanel() {
                   <CardTitle className="text-sm">Call Progress</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-4 gap-2 text-center">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                     <Stat label="Stores" value={ticket.progress.stores_found} />
                     <Stat label="Total Calls" value={ticket.progress.calls_total} />
                     <Stat label="Completed" value={ticket.progress.calls_completed} />
@@ -312,17 +320,17 @@ function StoreCallCard({ call }: { call: StoreCall }) {
     );
 
   return (
-    <div className="rounded-lg border p-3 space-y-1">
+    <div className="rounded-lg border p-2.5 sm:p-3 space-y-1">
       <div
-        className="flex items-center justify-between cursor-pointer"
+        className="flex items-center justify-between cursor-pointer min-h-[36px]"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
           {statusIcon}
-          <Store className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-sm font-medium">{call.store_name}</span>
+          <Store className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-sm font-medium truncate">{call.store_name}</span>
         </div>
-        <Badge variant="outline" className="text-[10px]">
+        <Badge variant="outline" className="text-[10px] shrink-0 ml-2">
           {call.status}
         </Badge>
       </div>
@@ -354,7 +362,7 @@ function StoreCallCard({ call }: { call: StoreCall }) {
           <Separator className="my-2" />
           <div className="text-xs">
             <p className="text-muted-foreground font-medium mb-1">Transcript:</p>
-            <pre className="bg-muted p-2 rounded text-[11px] whitespace-pre-wrap max-h-48 overflow-y-auto">
+            <pre className="bg-muted p-2 rounded text-[11px] whitespace-pre-wrap max-h-48 overflow-y-auto wrap-break-word">
               {call.transcript}
             </pre>
           </div>
@@ -491,7 +499,7 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
             </div>
           )}
 
-          <div className="grid grid-cols-4 gap-2 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
             {storesContacted != null && <Stat label="Stores" value={storesContacted} />}
             {callsConnected != null && <Stat label="Connected" value={callsConnected} />}
             {callsFailed != null && <Stat label="Failed" value={callsFailed} />}
@@ -510,16 +518,16 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
             </div>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="font-medium">{String(bestOption.store_name || "Unknown")}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium truncate">{String(bestOption.store_name || "Unknown")}</span>
               {bestOption.price != null && (
-                <span className="text-base font-bold text-green-400">
+                <span className="text-base font-bold text-green-400 shrink-0">
                   ₹{Number(bestOption.price).toLocaleString("en-IN")}
                 </span>
               )}
             </div>
             {Boolean(bestOption.matched_product) && (
-              <p className="text-xs text-muted-foreground">{String(bestOption.matched_product)}</p>
+              <p className="text-xs text-muted-foreground wrap-break-word">{String(bestOption.matched_product)}</p>
             )}
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
               {Boolean(bestOption.product_match_type) && (
@@ -595,7 +603,7 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
             )}
 
             {priceRange && (
-              <div className="flex gap-4 text-xs text-muted-foreground">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 {priceRange.lowest != null && (
                   <span>Low: <span className="text-green-400 font-medium">₹{priceRange.lowest.toLocaleString("en-IN")}</span></span>
                 )}
@@ -633,14 +641,14 @@ function ResultCard({ result }: { result: Record<string, unknown> }) {
                     key={i}
                     className="rounded-lg border border-blue-500/20 p-2.5 text-xs space-y-1"
                   >
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-1.5 sm:gap-2 flex-wrap">
                       <Badge
                         variant="outline"
                         className="text-[10px] border-blue-400/30 text-blue-400"
                       >
                         {String(d.platform)}
                       </Badge>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 sm:gap-2">
                         {d.original_price != null && d.original_price !== d.price && (
                           <span className="text-muted-foreground line-through">
                             ₹{Number(d.original_price).toLocaleString("en-IN")}

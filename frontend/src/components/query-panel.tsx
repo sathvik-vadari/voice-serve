@@ -417,10 +417,10 @@ export function QueryPanel() {
   if (isHeroView) {
     return (
       <div
-        className="flex flex-col items-center justify-center px-2"
-        style={{ minHeight: "calc(100vh - 220px)" }}
+        className="flex flex-col items-center justify-center px-1 sm:px-2"
+        style={{ minHeight: "calc(100dvh - 180px)" }}
       >
-        <div className="w-full max-w-lg space-y-5">
+        <div className="w-full max-w-lg space-y-4 sm:space-y-5">
           <Textarea
             id="query"
             placeholder="What do you need? e.g. iPhone 15 128GB black, 2 butter naans..."
@@ -441,7 +441,7 @@ export function QueryPanel() {
           {!showDetails && phone.trim() && address.trim() ? (
             <button
               onClick={() => setShowDetails(true)}
-              className="w-full flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-2 rounded-lg hover:bg-muted/50"
+              className="w-full flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-2.5 rounded-lg hover:bg-muted/50 min-h-[44px]"
             >
               <Phone className="h-3 w-3 shrink-0" />
               <span className="truncate">{phone}</span>
@@ -451,7 +451,7 @@ export function QueryPanel() {
               <Pencil className="h-3 w-3 shrink-0 ml-auto opacity-50" />
             </button>
           ) : (
-            <div className="space-y-2.5 rounded-xl border border-border/50 p-3.5">
+            <div className="space-y-2.5 rounded-xl border border-border/50 p-3 sm:p-3.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-muted-foreground">
                   Your details
@@ -459,31 +459,33 @@ export function QueryPanel() {
                 {phone.trim() && address.trim() && (
                   <button
                     onClick={() => setShowDetails(false)}
-                    className="text-xs text-primary hover:underline"
+                    className="text-xs text-primary hover:underline py-1 px-2"
                   >
                     Done
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Input
                   placeholder="Name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="h-9 text-sm"
+                  className="h-11 sm:h-9 text-sm"
                 />
                 <Input
                   placeholder="Phone *"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="h-9 text-sm"
+                  className="h-11 sm:h-9 text-sm"
+                  type="tel"
+                  inputMode="tel"
                 />
               </div>
               <Input
                 placeholder="Delivery address with area & city *"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                className="h-9 text-sm"
+                className="h-11 sm:h-9 text-sm"
               />
             </div>
           )}
@@ -498,7 +500,7 @@ export function QueryPanel() {
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-7 w-7 shrink-0"
+                className="h-9 w-9 sm:h-7 sm:w-7 shrink-0"
                 onClick={() => setMaxStores((v) => Math.max(1, v - 1))}
                 disabled={maxStores <= 1}
               >
@@ -511,7 +513,7 @@ export function QueryPanel() {
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-7 w-7 shrink-0"
+                className="h-9 w-9 sm:h-7 sm:w-7 shrink-0"
                 onClick={() => setMaxStores((v) => Math.min(10, v + 1))}
                 disabled={maxStores >= 10}
               >
@@ -521,7 +523,7 @@ export function QueryPanel() {
           </div>
 
           <Button
-            className="w-full"
+            className="w-full h-12 sm:h-10 text-base sm:text-sm"
             onClick={handleSubmit}
             disabled={!phone.trim() || !address.trim() || !query.trim()}
           >
@@ -535,8 +537,8 @@ export function QueryPanel() {
 
   // ── Chat view: messages + bottom action bar ──────────────────────────
   return (
-    <div className="flex flex-col" style={{ height: "calc(100vh - 200px)" }}>
-      <ScrollArea className="flex-1 pr-2">
+    <div className="flex flex-col" style={{ height: "calc(100dvh - 160px)" }}>
+      <ScrollArea className="flex-1 pr-1 sm:pr-2">
         <div className="space-y-3 pb-4">
           {messages.map((msg) => (
             <MessageBubble
@@ -560,17 +562,18 @@ export function QueryPanel() {
         </div>
       </ScrollArea>
 
-      <Separator className="my-3" />
+      <Separator className="my-2 sm:my-3" />
 
       {/* New query input (after "New Query" action) */}
       {phase === "input" && (
-        <div className="space-y-3 pb-4">
+        <div className="space-y-2.5 pb-3 sm:pb-4">
           <Textarea
             id="query"
             placeholder="Describe what you need..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             rows={2}
+            className="text-base sm:text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -580,7 +583,7 @@ export function QueryPanel() {
           />
           <div className="flex items-center gap-2">
             <Button
-              className="flex-1"
+              className="flex-1 h-11 sm:h-9"
               onClick={handleSubmit}
               disabled={!phone.trim() || !address.trim() || !query.trim()}
             >
@@ -590,7 +593,7 @@ export function QueryPanel() {
             <Button
               variant="outline"
               size="icon"
-              className="h-9 w-9 shrink-0"
+              className="h-11 w-11 sm:h-9 sm:w-9 shrink-0"
               onClick={() => setShowDetails((v) => !v)}
             >
               <Pencil className="h-3.5 w-3.5" />
@@ -598,25 +601,27 @@ export function QueryPanel() {
           </div>
           {showDetails && (
             <div className="space-y-2 rounded-xl border border-border/50 p-3">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Input
                   placeholder="Name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="h-9 text-sm"
+                  className="h-11 sm:h-9 text-sm"
                 />
                 <Input
                   placeholder="Phone *"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="h-9 text-sm"
+                  className="h-11 sm:h-9 text-sm"
+                  type="tel"
+                  inputMode="tel"
                 />
               </div>
               <Input
                 placeholder="Delivery address *"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                className="h-9 text-sm"
+                className="h-11 sm:h-9 text-sm"
               />
             </div>
           )}
@@ -625,30 +630,32 @@ export function QueryPanel() {
 
       {/* Retry input — edit details and re-submit */}
       {phase === "retry_input" && (
-        <div className="space-y-3 pb-4">
-          <div className="space-y-2.5 rounded-xl border border-border/50 p-3.5">
+        <div className="space-y-2.5 pb-3 sm:pb-4">
+          <div className="space-y-2.5 rounded-xl border border-border/50 p-3 sm:p-3.5">
             <span className="text-xs font-medium text-muted-foreground">
               Update your details
             </span>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <Input
                 placeholder="Name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="h-9 text-sm"
+                className="h-11 sm:h-9 text-sm"
               />
               <Input
                 placeholder="Phone *"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="h-9 text-sm"
+                className="h-11 sm:h-9 text-sm"
+                type="tel"
+                inputMode="tel"
               />
             </div>
             <Input
               placeholder="Delivery address *"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="h-9 text-sm"
+              className="h-11 sm:h-9 text-sm"
             />
           </div>
           <div className="flex items-center justify-center gap-3">
@@ -658,7 +665,7 @@ export function QueryPanel() {
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-7 w-7"
+                className="h-9 w-9 sm:h-7 sm:w-7"
                 onClick={() => setMaxStores((v) => Math.max(1, v - 1))}
                 disabled={maxStores <= 1}
               >
@@ -671,7 +678,7 @@ export function QueryPanel() {
                 type="button"
                 variant="outline"
                 size="icon"
-                className="h-7 w-7"
+                className="h-9 w-9 sm:h-7 sm:w-7"
                 onClick={() => setMaxStores((v) => Math.min(10, v + 1))}
                 disabled={maxStores >= 10}
               >
@@ -680,7 +687,7 @@ export function QueryPanel() {
             </div>
           </div>
           <Button
-            className="w-full"
+            className="w-full h-12 sm:h-10 text-base sm:text-sm"
             onClick={handleRetrySubmit}
             disabled={!phone.trim() || !address.trim()}
           >
@@ -705,12 +712,12 @@ export function QueryPanel() {
       )}
 
       {phase === "rejected" && (
-        <div className="flex gap-3 pb-4">
-          <Button variant="outline" className="flex-1" onClick={handleTryAgain}>
+        <div className="flex gap-2.5 sm:gap-3 pb-3 sm:pb-4">
+          <Button variant="outline" className="flex-1 h-11 sm:h-9" onClick={handleTryAgain}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Try Again
           </Button>
-          <Button className="flex-1" onClick={handleNewQuery}>
+          <Button className="flex-1 h-11 sm:h-9" onClick={handleNewQuery}>
             <Send className="mr-2 h-4 w-4" />
             New Query
           </Button>
@@ -718,8 +725,8 @@ export function QueryPanel() {
       )}
 
       {phase === "done" && (
-        <div className="text-center pb-4">
-          <Button variant="outline" onClick={handleReset}>
+        <div className="text-center pb-3 sm:pb-4">
+          <Button variant="outline" className="h-11 sm:h-9" onClick={handleReset}>
             Start New Query
           </Button>
           {ticketId && (
@@ -754,9 +761,9 @@ function PipelineTracker({
   const webSearchDone = hasWebDeals;
 
   return (
-    <div className="mx-auto max-w-[85%]">
+    <div className="mx-auto max-w-full sm:max-w-[85%]">
       <Card className="bg-muted/50 border-muted">
-        <CardContent className="p-4">
+        <CardContent className="p-3 sm:p-4">
           <div className="space-y-1">
             {PIPELINE_STEPS.map((step, idx) => {
               const isDone = idx < currentIdx;
@@ -878,13 +885,13 @@ function MessageBubble({
 }) {
   const isUser = msg.role === "user";
   const bubbleWidthClass = isUser
-    ? "max-w-[75%] w-fit"
-    : "max-w-[min(100%,36rem)] w-full";
+    ? "max-w-[88%] sm:max-w-[75%] w-fit"
+    : "max-w-full sm:max-w-[min(100%,36rem)] w-full";
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`${bubbleWidthClass} min-w-0 rounded-2xl px-4 py-2.5 text-sm overflow-hidden ${
+        className={`${bubbleWidthClass} min-w-0 rounded-2xl px-3 sm:px-4 py-2.5 text-sm overflow-hidden ${
           isUser
             ? "bg-primary text-primary-foreground"
             : "bg-muted text-foreground"
@@ -976,11 +983,11 @@ function OptionCard({
 }) {
   return (
     <Card className="bg-background/50">
-      <CardContent className="p-3">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1 flex-1">
-            <div className="flex items-center gap-2">
-              <Store className="h-3.5 w-3.5 text-muted-foreground" />
+      <CardContent className="p-2.5 sm:p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="space-y-1 flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <Store className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span className="font-medium text-sm">
                 {index}. {option.store_name}
               </span>
@@ -999,32 +1006,34 @@ function OptionCard({
             </div>
 
             {option.matched_product && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground wrap-break-word">
                 {option.matched_product}
               </p>
             )}
 
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <div className="flex flex-wrap gap-x-3 sm:gap-x-4 gap-y-1 text-xs text-muted-foreground">
               {option.price != null && <span>₹{option.price}</span>}
               {option.rating != null && <span>★ {option.rating}</span>}
               {option.address && (
                 <span className="flex items-center gap-1">
-                  <MapPin className="h-3 w-3" />
-                  {option.address.length > 50
-                    ? option.address.slice(0, 50) + "…"
-                    : option.address}
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  <span className="truncate">
+                    {option.address.length > 40
+                      ? option.address.slice(0, 40) + "…"
+                      : option.address}
+                  </span>
                 </span>
               )}
               {option.phone_number && (
                 <span className="flex items-center gap-1">
-                  <Phone className="h-3 w-3" />
+                  <Phone className="h-3 w-3 shrink-0" />
                   {option.phone_number}
                 </span>
               )}
             </div>
 
             {option.call_summary && (
-              <p className="text-xs italic text-muted-foreground mt-1">
+              <p className="text-xs italic text-muted-foreground mt-1 wrap-break-word">
                 &quot;{option.call_summary}&quot;
               </p>
             )}
@@ -1033,7 +1042,7 @@ function OptionCard({
           {canConfirm && (
             <Button
               size="sm"
-              className="ml-2 shrink-0"
+              className="ml-1 shrink-0 h-10 sm:h-8 px-3"
               onClick={() => onConfirm(option)}
             >
               <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
@@ -1146,7 +1155,7 @@ function WebDealsCarousel({ deals }: { deals: WebDeal[] }) {
           <div
             key={`${deal.platform}-${i}`}
             className="snap-start shrink-0"
-            style={{ flexBasis: total > 1 ? "78%" : "100%" }}
+            style={{ flexBasis: total > 1 ? "88%" : "100%" }}
           >
             <WebDealSlide deal={deal} />
           </div>
@@ -1177,7 +1186,7 @@ function WebDealsCarousel({ deals }: { deals: WebDeal[] }) {
 
 function WebDealSlide({ deal }: { deal: WebDeal }) {
   return (
-    <div className="rounded-xl border border-blue-500/20 bg-background/60 px-4 py-3.5 space-y-2.5">
+    <div className="rounded-xl border border-blue-500/20 bg-background/60 px-3 sm:px-4 py-3 sm:py-3.5 space-y-2">
       {/* Row 1: platform badge + price */}
       <div className="flex items-center justify-between gap-3">
         <Badge
@@ -1263,7 +1272,7 @@ function WebDealSlide({ deal }: { deal: WebDeal }) {
           href={deal.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 w-full mt-0.5 py-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 hover:text-blue-300 text-xs font-medium transition-colors"
+          className="flex items-center justify-center gap-2 w-full mt-0.5 py-2.5 sm:py-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 active:bg-blue-500/30 text-blue-400 hover:text-blue-300 text-xs font-medium transition-colors"
         >
           <ExternalLink className="h-3.5 w-3.5" />
           View on {deal.platform}
