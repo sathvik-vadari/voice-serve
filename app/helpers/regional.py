@@ -13,7 +13,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
         "display_name": "Bengaluru",
         "voice_language": "hi",
         "regional_language": "kannada",
-        "greeting": "Namaste ji! Main Faff ki taraf se call kar raha hoon.",
+        "greeting": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon.",
         "thank_you": "Bahut dhanyavaad ji! Aapne bahut madad ki.",
         "busy_response": "Koi baat nahi ji, aapka time le liya. Dhanyavaad!",
         "communication_style": (
@@ -22,7 +22,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
             "or explicitly asks you to speak in Kannada. In that case, you can use "
             "basic Kannada phrases mixed with Hindi. Use 'saar', 'ji' respectfully."
         ),
-        "first_message": "Namaste ji! Main Faff ki taraf se call kar raha hoon. Ek minute milega kya?",
+        "first_message": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon. Ek minute milega kya?",
     },
     "delhi": {
         "city_aliases": [
@@ -33,7 +33,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
         "display_name": "Delhi NCR",
         "voice_language": "hi",
         "regional_language": "hindi",
-        "greeting": "Namaste ji! Main Faff ki taraf se call kar raha hoon.",
+        "greeting": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon.",
         "thank_you": "Bahut bahut dhanyavaad! Aapne bahut madad ki.",
         "busy_response": "Koi baat nahi bhaiya, aapka time le liya. Shukriya!",
         "communication_style": (
@@ -41,7 +41,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
             "Use 'bhaiya', 'ji', 'arey' naturally. Be warm and direct. "
             "If the store person speaks in English, you can switch to English."
         ),
-        "first_message": "Namaste ji! Main Faff ki taraf se call kar raha hoon. Ek minute milega kya?",
+        "first_message": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon. Ek minute milega kya?",
     },
     "mumbai": {
         "city_aliases": [
@@ -51,7 +51,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
         "display_name": "Mumbai",
         "voice_language": "hi",
         "regional_language": "marathi",
-        "greeting": "Namaste ji! Main Faff ki taraf se call kar raha hoon.",
+        "greeting": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon.",
         "thank_you": "Dhanyavaad ji! Bahut help ho gayi.",
         "busy_response": "Theek hai ji, aapka time le liya. Dhanyavaad!",
         "communication_style": (
@@ -60,7 +60,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
             "ONLY switch to Marathi if the store person starts speaking in Marathi "
             "or asks you to. Otherwise stay in Hindi."
         ),
-        "first_message": "Namaste ji! Main Faff ki taraf se call kar raha hoon. Ek minute milega kya?",
+        "first_message": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon. Ek minute milega kya?",
     },
     "chennai": {
         "city_aliases": [
@@ -70,7 +70,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
         "display_name": "Chennai",
         "voice_language": "hi",
         "regional_language": "tamil",
-        "greeting": "Namaste ji! Main Faff ki taraf se call kar raha hoon.",
+        "greeting": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon.",
         "thank_you": "Bahut dhanyavaad ji! Aapne bahut madad ki.",
         "busy_response": "Koi baat nahi ji, aapka time le liya. Dhanyavaad!",
         "communication_style": (
@@ -79,7 +79,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
             "don't understand Hindi. In that case, use simple Tamil mixed with English. "
             "Use 'sir', 'ji' respectfully."
         ),
-        "first_message": "Namaste ji! Main Faff ki taraf se call kar raha hoon. Ek minute milega kya?",
+        "first_message": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon. Ek minute milega kya?",
     },
     "hyderabad": {
         "city_aliases": [
@@ -89,7 +89,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
         "display_name": "Hyderabad",
         "voice_language": "hi",
         "regional_language": "telugu",
-        "greeting": "Namaste ji! Main Faff ki taraf se call kar raha hoon.",
+        "greeting": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon.",
         "thank_you": "Shukriya ji! Bahut madad hui.",
         "busy_response": "Koi baat nahi ji, aapka time le liya. Shukriya!",
         "communication_style": (
@@ -98,7 +98,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
             "ONLY switch to Telugu if the store person starts speaking in Telugu "
             "or asks you to. Otherwise stay in Hindi."
         ),
-        "first_message": "Namaste ji! Main Faff ki taraf se call kar raha hoon. Ek minute milega kya?",
+        "first_message": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon. Ek minute milega kya?",
     },
     "kolkata": {
         "city_aliases": [
@@ -108,7 +108,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
         "display_name": "Kolkata",
         "voice_language": "hi",
         "regional_language": "bengali",
-        "greeting": "Namaste ji! Main Faff ki taraf se call kar raha hoon.",
+        "greeting": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon.",
         "thank_you": "Bahut dhanyavaad ji! Aapne bahut madad ki.",
         "busy_response": "Koi baat nahi ji, aapka time le liya. Dhanyavaad!",
         "communication_style": (
@@ -117,7 +117,7 @@ REGIONAL_PROFILES: dict[str, dict[str, Any]] = {
             "prefer Bengali. In that case, use simple Bengali mixed with Hindi. "
             "Use 'dada', 'ji' respectfully."
         ),
-        "first_message": "Namaste ji! Main Faff ki taraf se call kar raha hoon. Ek minute milega kya?",
+        "first_message": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon. Ek minute milega kya?",
     },
 }
 
@@ -125,7 +125,7 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "display_name": "India",
     "voice_language": "hi",
     "regional_language": "hindi",
-    "greeting": "Namaste ji! Main Faff ki taraf se call kar raha hoon.",
+    "greeting": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon.",
     "thank_you": "Bahut dhanyavaad ji! Aapne bahut madad ki.",
     "busy_response": "Koi baat nahi ji, aapka time le liya. Dhanyavaad!",
     "communication_style": (
@@ -133,7 +133,7 @@ DEFAULT_PROFILE: dict[str, Any] = {
         "Be polite, warm, and conversational. Use 'ji', 'bhaiya' respectfully. "
         "If the store person speaks in English, you can switch to English."
     ),
-    "first_message": "Namaste ji! Main Faff ki taraf se call kar raha hoon. Ek minute milega kya?",
+    "first_message": "Namaste ji! Main {customer_name} ki taraf se call kar rahi hoon. Ek minute milega kya?",
 }
 
 

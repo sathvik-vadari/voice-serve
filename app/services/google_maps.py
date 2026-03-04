@@ -40,7 +40,7 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def _extract_city_area(location: str) -> str:
     """Extract neighborhood + city from a full address for cleaner search queries.
 
-    '1st Floor, faffHQ, HSR Layout, Bangalore' → 'HSR Layout, Bangalore'
+    '1st Floor, Office, HSR Layout, Bangalore' → 'HSR Layout, Bangalore'
     """
     parts = [p.strip() for p in location.split(",")]
     skip_keywords = ["floor", "flat", "door", "shop", "no.", "no ", "building", "#"]

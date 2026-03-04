@@ -466,10 +466,12 @@ async def _retry_store_call(sc: dict, delay_seconds: int) -> None:
             return
 
         location = ticket.get("location", "")
+        customer_name = ticket.get("user_name")
         retry_num = get_store_call_retry_count(sc["id"]) + 1
 
         prompt, region, first_message = _build_store_prompt(
             product, location, store["store_name"],
+            customer_name=customer_name or "a customer",
         )
 
         logger.info(

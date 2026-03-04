@@ -91,6 +91,7 @@ async def create_ticket_endpoint(req: TicketRequest, bg: BackgroundTasks):
     bg.add_task(
         _process_ticket, ticket_id, req.query, req.location, req.user_phone,
         test_mode=is_test, test_phone=test_phone, max_stores=max_stores,
+        user_name=req.user_name,
     )
 
     return TicketResponse(
@@ -353,6 +354,7 @@ async def _process_ticket(
     ticket_id: str, query: str, location: str, user_phone: str,
     *, test_mode: bool = False, test_phone: Optional[str] = None,
     max_stores: Optional[int] = None,
+    user_name: Optional[str] = None,
 ) -> None:
     """Full async pipeline: classify → research → find stores → call stores."""
     try:
@@ -367,7 +369,7 @@ async def _process_ticket(
         if query_type == "wakeup_alarm":
             await _handle_wakeup(ticket_id, query, user_phone)
         else:
-            await _handle_order(ticket_id, query, location, test_mode=test_mode, test_phone=test_phone, max_stores=max_stores)
+            await _handle_order(ticket_id, query, location, test_mode=test_mode, test_phone=test_phone, max_stores=max_stores, user_name=user_name)
 
     except Exception as e:
         logger.exception("Pipeline failed for ticket %s", ticket_id)
@@ -400,6 +402,7 @@ async def _handle_order(
     ticket_id: str, query: str, location: str,
     *, test_mode: bool = False, test_phone: Optional[str] = None,
     max_stores: Optional[int] = None,
+    user_name: Optional[str] = None,
 ) -> None:
     """Handle order/product flow: analyze → research → [web search + find stores + call] in parallel."""
 
@@ -497,11 +500,11 @@ async def _handle_order(
         call_results = await call_stores(
             ticket_id, product, location,
             test_mode=True, test_phone=test_phone or Config.TEST_PHONE,
-            max_stores=max_stores,
+            max_stores=max_stores, customer_name=user_name,
         )
     else:
         update_ticket_status(ticket_id, "calling_stores")
-        call_results = await call_stores(ticket_id, product, location, max_stores=max_stores)
+        call_results = await call_stores(ticket_id, product, location, max_stores=max_stores, customer_name=user_name)
 
     logger.info(
         "Ticket %s: initiated %d store calls (%d successful)",

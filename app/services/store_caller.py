@@ -22,6 +22,7 @@ MAX_STORES = Config.MAX_STORES_TO_CALL
 
 def _build_store_prompt(
     product: dict[str, Any], location: str, store_name: str,
+    customer_name: str = "a customer",
 ) -> tuple[str, dict[str, Any], str]:
     """
     Fill the store_caller prompt template with product details, store name, and regional context.
@@ -49,15 +50,18 @@ def _build_store_prompt(
     ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     current_datetime = ist_now.strftime("%A, %d %B %Y, %I:%M %p IST")
 
+    greeting = region.get("greeting", "Namaste ji!").replace("{customer_name}", customer_name)
+
     prompt = template.replace("{current_datetime}", current_datetime)
     prompt = prompt.replace("{product_name}", product_name)
     prompt = prompt.replace("{product_specs}", specs_str)
     prompt = prompt.replace("{alternatives}", alts_str)
     prompt = prompt.replace("{location}", location)
     prompt = prompt.replace("{store_name}", store_name)
+    prompt = prompt.replace("{customer_name}", customer_name)
     prompt = prompt.replace("{city}", region.get("display_name", "India"))
     prompt = prompt.replace("{regional_language}", region.get("regional_language", "hindi"))
-    prompt = prompt.replace("{greeting}", region.get("greeting", "Namaste ji!"))
+    prompt = prompt.replace("{greeting}", greeting)
     prompt = prompt.replace("{communication_style}", region.get("communication_style", "Speak in Hindi mixed with English."))
     prompt = prompt.replace("{thank_you}", region.get("thank_you", "Bahut dhanyavaad ji!"))
     prompt = prompt.replace("{busy_response}", region.get("busy_response", "Koi baat nahi ji, dhanyavaad!"))
@@ -71,6 +75,7 @@ async def call_stores(
     ticket_id: str, product: dict[str, Any], location: str,
     *, test_mode: bool = False, test_phone: str | None = None,
     max_stores: int | None = None,
+    customer_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Initiate VAPI calls to stores saved for this ticket.
@@ -114,6 +119,7 @@ async def call_stores(
 
         prompt, region, first_message = _build_store_prompt(
             product, location, store["store_name"],
+            customer_name=customer_name or "a customer",
         )
         store_call_id = create_store_call(ticket_id, store["id"])
 
